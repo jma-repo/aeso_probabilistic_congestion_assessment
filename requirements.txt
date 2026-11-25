@@ -13,6 +13,11 @@ pytest>=8
 lightgbm>=4.0
 scikit-learn>=1.4
 torch>=2.2   # CPU is enough; the PyPI wheel works without a GPU
+# Phase 4
+sqlalchemy>=2.0
+streamlit>=1.35
+plotly>=5.20
+# optional DB drivers (not needed for the default SQLite): psycopg[binary] (PostgreSQL), pyodbc (SQL Server)
 # notebook execution
 nbformat>=5.9
 nbclient>=0.10

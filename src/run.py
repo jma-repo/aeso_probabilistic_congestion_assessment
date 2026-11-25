@@ -10,6 +10,9 @@ Phase 2: Monte Carlo (uncertainty + forced outages), rating sensitivity,
          N-1 contingency screen + re-dispatch -> reports/phase2_summary.{json,md}
 Phase 3: ML surrogates (baseline, LightGBM, MLP, congestion classifier),
          surrogate Monte Carlo vs full OPF -> reports/phase3_summary.{json,md}
+Phase 4: load network, scenarios, inputs and results into SQL (DB_URL or
+         config db.url; SQLite by default) + DDL for sqlite/postgresql/mssql.
+         Then: streamlit run src/dashboard.py
 """
 from __future__ import annotations
 
@@ -24,7 +27,7 @@ from .config import data_dir, load_config, reports_dir
 from .simulate import DispatchResult, solve_dispatch, summarize
 from .synth import generate_inputs
 
-IMPLEMENTED_PHASES = (1, 2, 3)
+IMPLEMENTED_PHASES = (1, 2, 3, 4)
 
 
 def save_result(res: DispatchResult, folder, prefix: str = "") -> None:
@@ -344,6 +347,26 @@ def phase2_markdown(s, line_tab, q_det, q_mc, sens, ranked, dlmp) -> str:
     return "\n".join(L) + "\n"
 
 
+def phase4(cfg: dict) -> dict:
+    from . import db
+    from .config import ROOT
+
+    print(f"[phase 4] writing database: {db.safe_url(db.db_url(cfg))}")
+    out = db.store_all(cfg)
+    total = sum(out["rows"].values())
+    print(f"   run_id {out['run_id']}: {total:,} rows in {out['seconds']:.1f}s")
+    for p in db.export_ddl(ROOT / "sql"):
+        print(f"   wrote {p.relative_to(ROOT)}")
+    rep = reports_dir(cfg)
+    with open(rep / "phase4_summary.json", "w") as f:
+        # never write a connection string from the environment (may hold credentials) into the repo
+        import os
+        url = "<DB_URL from environment>" if os.environ.get("DB_URL") else cfg["db"]["url"]
+        json.dump({**out, "url": url, "total_rows": total}, f, indent=2)
+    print("[phase 4] done -> streamlit run src/dashboard.py")
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default=None)
@@ -361,6 +384,8 @@ def main(argv=None):
     if 3 in phases:
         from .surrogate_study import phase3
         phase3(cfg, phase2_runner=phase2)
+    if 4 in phases:
+        phase4(cfg)
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ LMP data to learn from. This project therefore:
 4. stores everything in **SQL** and shows it in a **Streamlit** dashboard *(Phase 4)*,
 5. calibrates load and wind/solar shapes against **real AESO data** *(Phase 5)*.
 
-> **Status:** Phases 1–3 complete. Phases 4–5 are planned (see [Roadmap](#roadmap)).
+> **Status:** Phases 1–4 complete. Phase 5 (real AESO data) waits for an API key (see [Roadmap](#roadmap)).
 
 > ⚠️ **This is a DC approximation.** DC-OPF assumes lossless lines, flat voltage magnitudes and small angle
 > differences, and ignores reactive power and voltage limits entirely. All capacities, costs and line ratings are
@@ -88,14 +88,27 @@ python -m src.run
 pytest -q
 ```
 
-`python -m src.run` runs every implemented phase (currently Phases 1–3, ≈11 min on 4 cores). Use
+`python -m src.run` runs every implemented phase (currently Phases 1–4, ≈11 min on 4 cores). Use
 `python -m src.run --phases 2` to run a single phase; Phase 2 reuses Phase 1 outputs, or creates them if they
-are missing. `pytest -q` runs 21 correctness tests in about 70 s.
+are missing. `pytest -q` runs 26 correctness tests in about 90 s.
+
+Then open the dashboard (it reads only from the database):
+
+```bash
+streamlit run src/dashboard.py
+```
+
+To use PostgreSQL or SQL Server instead of the default SQLite file, set `DB_URL` before running:
+
+```bash
+DB_URL="postgresql+psycopg://user:password@host:5432/aeso_poc" python -m src.run --phases 4
+```
 
 * Outputs go to `data/` as parquet files; this folder is git-ignored and can be regenerated.
+* The SQLite database is written to `data/aeso_poc.sqlite`.
 * Figures and summaries go to `reports/` and are committed.
-* The walkthroughs are `notebooks/01_phase1_walkthrough.ipynb`, `notebooks/02_phase2_probabilistic.ipynb` and
-  `notebooks/03_phase3_surrogates.ipynb`.
+* The walkthroughs are `notebooks/01_phase1_walkthrough.ipynb`, `notebooks/02_phase2_probabilistic.ipynb`,
+  `notebooks/03_phase3_surrogates.ipynb` and `notebooks/04_phase4_sql.ipynb`.
 * Phase 2 and Phase 3 tables are also written as CSV files to `reports/tables/`.
 
 ### Repository layout
@@ -112,12 +125,16 @@ src/features.py      feature matrix, merit-order (copper-plate) price, leakage-f
 src/models.py        baseline, LightGBM per bus, PyTorch MLP, congestion classifier, hybrid wrapper
 src/evaluate.py      metrics by bus/regime, MC comparison, worst cases, 1-D step sweeps
 src/surrogate_study.py  Phase 3 pipeline
+src/db.py            SQLAlchemy schema, writers/readers, DDL export (python -m src.db --ddl)
+src/dashboard.py     Streamlit dashboard (reads only from the database)
 src/checks.py        sanity checks incl. an independent angle-based DC-OPF
 src/plots.py         figures
 src/run.py           one-command pipeline
 tests/               pytest suite (two-town, loop flow, outages vs zero rating, islanding, PTDF screen, ...)
 notebooks/           walkthrough
 reports/             generated summaries and figures (committed)
+sql/                 generated DDL (SQLite / PostgreSQL / SQL Server) + portable example queries
+docs/schema.md       ER diagram of the database
 ```
 
 ---
@@ -565,6 +582,73 @@ re-solve the OPF at 101 points.
 
 ---
 
+## Phase 4 — storage and visualization
+
+### SQL database
+
+All inputs and results are stored through **SQLAlchemy Core**:
+
+* network data;
+* every hour of the deterministic study and every Monte Carlo scenario, with its inputs and outages;
+* LMPs, line flows and generator dispatch;
+* surrogate predictions;
+* all summary tables.
+
+The default is a SQLite file (`data/aeso_poc.sqlite`, about 125 MB). Setting `DB_URL` points the same code at
+PostgreSQL or SQL Server. One pipeline run writes about **1.8 million rows in about 20 s**.
+
+![dashboard: network map](reports/figures/dashboard_map.png)
+
+* **Schema.** The ER diagram is in [`docs/schema.md`](docs/schema.md). There are 20 tables in five groups:
+  * network: `bus`, `line`, `generator`;
+  * `run`: one row per pipeline run, with a snapshot of the config;
+  * `scenario`: one row per hour or Monte Carlo scenario, per study;
+  * long-format inputs and results, keyed by `(run_id, study, scenario_id)`;
+  * summary tables: congestion statistics, LMP quantiles, the N-1 ranking, surrogate metrics, runtimes.
+* **Portability.** Only portable types are used (INTEGER, FLOAT, VARCHAR(n), BOOLEAN/BIT, DATETIME,
+  TEXT/NVARCHAR(max)). `python -m src.db --ddl` compiles the CREATE TABLE scripts for all three dialects without
+  needing a server: [`sql/schema_sqlite.sql`](sql/schema_sqlite.sql), [`sql/schema_postgresql.sql`](sql/schema_postgresql.sql)
+  and [`sql/schema_mssql.sql`](sql/schema_mssql.sql). Three portability issues came up and were fixed:
+  * a column named `timestamp` was renamed to `hour_start`, to avoid keyword clashes;
+  * SQL Server's deprecated TEXT type is replaced by NVARCHAR(max);
+  * booleans need care: `binding` is BOOLEAN on PostgreSQL and BIT on SQL Server, so a hand-written
+    `CASE WHEN binding THEN …` fails on SQL Server. The example queries compare against a bound `True` parameter
+    instead.
+* **Percentiles are computed in Python, not SQL.** `PERCENTILE_CONT` differs between engines, and SQLite does not
+  have it.
+* **Example queries.** [`sql/example_queries.sql`](sql/example_queries.sql) holds five portable queries:
+  * congestion probability straight from the raw scenario rows;
+  * LMP by topology;
+  * surrogate MAE on congested scenarios;
+  * monthly binding hours;
+  * the N-1 ranking.
+
+  They run in the tests and in `notebooks/04_phase4_sql.ipynb`. That notebook also checks that the SOUTH–CAL
+  congestion probability computed from raw SQL rows, from the summary table and from the Phase 2 report agree
+  exactly.
+* **Limitation: only SQLite was tested against a live database.** PostgreSQL and SQL Server were checked only by
+  compiling their DDL; no live server of either was available here. Driver packages (`psycopg`, `pyodbc`) are not
+  in `requirements.txt`.
+
+### Streamlit dashboard
+
+`streamlit run src/dashboard.py` opens four tabs. Every number is read from the database, never from files.
+
+| Tab | Content |
+|---|---|
+| **Network & congestion** | Map with lines coloured by P(line at limit). Choose the source: Monte Carlo with full OPF, Monte Carlo with the surrogate, or the deterministic hourly run. Hover a line for its rating and probability, or a bus for its generators and mean LMP. Table with 95% CIs. |
+| **LMP distributions** | Empirical CDF per bus for either study, with a P10/P50/P90/P99/mean table and P(LMP ≥ \$100). Optionally overlays the LightGBM, MLP and baseline predictions for one bus. |
+| **N-1 critical lines** | The ranked N-1 table (security and economic ranks) and a heatmap of the mean ΔLMP for each outaged line and bus. |
+| **OPF vs surrogate** | Runtime and accuracy headline numbers, OPF vs surrogate congestion probability with CIs, accuracy and runtime tables, and a predicted-vs-true scatter for a chosen bus and model. |
+
+![dashboard: N-1](reports/figures/dashboard_n1.png)
+![dashboard: OPF vs surrogate](reports/figures/dashboard_surrogate.png)
+
+The dashboard was checked by rendering all four tabs headlessly with Playwright (no exceptions, no page errors),
+and by a Streamlit `AppTest` smoke test in `tests/test_phase4.py`.
+
+---
+
 ## Roadmap
 
 | Phase | Content | Status |
@@ -572,7 +656,7 @@ re-solve the OPF at 101 points.
 | 1 | Synthetic grid, hourly DC-OPF/LMP simulator, sanity checks | ✅ done |
 | 2 | Monte Carlo (load, wind, line and generator outages); N-1 ranking; solve-time budget | ✅ done |
 | 3 | Surrogates: copper-plate baseline, per-bus LightGBM + SHAP, multi-output MLP, line-congestion classifier; surrogate MC versus full OPF | ✅ done |
-| 4 | SQLAlchemy store (SQLite by default; Postgres/SQL Server through the connection string); Streamlit dashboard | planned |
+| 4 | SQLAlchemy store (SQLite by default; Postgres/SQL Server through the connection string); Streamlit dashboard | ✅ done |
 | 5 | AESO API: real AIL load shape, wind/solar shapes, calibration against pool price (needs `AESO_API_KEY`) | after key is confirmed |
 
 ### Next steps beyond this POC

@@ -221,3 +221,13 @@ surrogate:
     huber_delta: 1.0
   classifier_threshold: 0.5
   step_sweep_points: 101      # OPF solves per 1-D sweep in the failure analysis
+
+# =============================================================================
+# Phase 4: storage + dashboard
+# =============================================================================
+db:
+  # Override with env var DB_URL, e.g. postgresql+psycopg://user:pass@host/aeso_poc
+  # or mssql+pyodbc://user:pass@host/aeso_poc?driver=ODBC+Driver+18+for+SQL+Server
+  url: sqlite:///data/aeso_poc.sqlite
+  recreate: true            # drop + recreate schema on each pipeline run (data is regenerable)
+  store_dispatch: true      # per-generator dispatch for every hour / scenario (largest table)
