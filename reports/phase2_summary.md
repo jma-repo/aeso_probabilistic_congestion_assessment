@@ -2,7 +2,7 @@
 
 ## Monte Carlo
 
-* **20,000 scenarios** solved as 51 LPs over 33 distinct topologies on 4 workers: **25.9 s wall** (1.29 ms/scenario; sum of LP times 88.1 s)
+* **20,000 scenarios** solved as 51 LPs over 33 distinct topologies on 4 workers: **24.5 s wall** (1.22 ms/scenario; sum of LP times 82.3 s)
 * Scenarios with ≥1 line out: 8.2%; mean generation on forced outage: 739 MW
 * P(≥1 internal line at limit) = **26.7%** [26.1%, 27.3%] → 2,337 h/yr; including the BC intertie 33.1% → 2,898 h/yr
 * Adequacy: LOLP 0.055% [0.031%, 0.098%] → LOLE 4.8 h/yr; EUE 1,414 MWh/yr [268, 2,560]
@@ -62,7 +62,7 @@ Deterministic (2-year hourly, no outages):
 
 ## N-1 contingency analysis
 
-* 8 single-line outages × 17,520 hours; re-dispatch solved as 192 LPs; total N-1 wall time 85.1 s
+* 8 single-line outages × 17,520 hours; re-dispatch solved as 192 LPs; total N-1 wall time 92.9 s
 * Security screen = flows with the *pre-contingency* dispatch on the reduced network (PTDF). Economic view = full DC-OPF re-dispatch without the line.
 
 ### Ranked critical lines

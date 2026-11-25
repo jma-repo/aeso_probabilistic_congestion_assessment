@@ -486,22 +486,22 @@ Both choices are backed by a full ablation in `reports/phase3_summary.md`:
 
 ![LMP ECDF: OPF vs surrogates](reports/figures/surrogate_lmp_ecdf.png)
 
-| Runtime for the 20,000-scenario study | Seconds | Speed-up |
+| Runtime for the 20,000-scenario study (range over two full runs) | Seconds | Speed-up |
 |---|---:|---:|
-| DC-OPF, 4 worker processes (Phase 2) | 25.9 | 1× |
-| DC-OPF, 1 core (sum of LP times) | 88.1 | — |
-| LightGBM + classifier, 4 threads | 2.2 | **12×** |
-| LightGBM + classifier, 1 thread | 6.3 | 14× vs 1-core OPF |
-| MLP + classifier, 4 threads | 0.37 | **71×** |
-| Merit-order baseline | 0.04 | 630× |
+| DC-OPF, 4 worker processes (Phase 2) | 24.5–25.9 | 1× |
+| DC-OPF, 1 core (sum of LP times) | 82–88 | — |
+| LightGBM + classifier, 4 threads | 1.9–2.2 | **12–13×** |
+| LightGBM + classifier, 1 thread | 6.3 | ≈13–14× vs 1-core OPF |
+| MLP + classifier, 4 threads | 0.36–0.37 | **≈70×** |
+| Merit-order baseline | 0.04 | ≈600× |
 
 ![runtime](reports/figures/surrogate_runtime.png)
 
 **The speed-up only pays off for repeated studies.**
 
-* The surrogate's up-front cost is 26 s of OPF to generate the training data plus 13 s of fitting. For a *single*
+* The surrogate's up-front cost is about 27 s of OPF to generate the training data plus 12–13 s of fitting. For a *single*
   20,000-scenario study, that is more than running the OPF Monte Carlo directly.
-* **Break-even is about 33,000 scenarios.** Beyond that, every additional study comes almost free: sensitivity
+* **Break-even is about 33,000–34,000 scenarios.** Beyond that, every additional study comes almost free: sensitivity
   sweeps, 10⁶-scenario runs for rare events, and real-time what-if screening.
 * The learning curve shows how much training data is needed. With 5,000 training OPFs, congestion probabilities
   are already within 0.3 pp and MAE is \$1.11. With 17,000, they are within 0.06 pp and MAE is \$0.84.

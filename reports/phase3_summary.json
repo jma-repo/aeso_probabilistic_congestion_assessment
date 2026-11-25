@@ -1,0 +1,160 @@
+{
+  "mc_task": {
+    "n_train_scenarios": 17000,
+    "n_val_scenarios": 3000,
+    "n_test_scenarios": 20000,
+    "n_features": 39,
+    "train_opf_seconds": 26.650455102000706,
+    "fit_seconds": {
+      "baseline (copper plate)": 0.0,
+      "LightGBM": 9.417746741999508,
+      "MLP": 13.723892541999703,
+      "classifier": 2.1515408759996717
+    },
+    "mlp_best_epoch": 70,
+    "summary_by_model": [
+      {
+        "model": "baseline (copper plate)",
+        "MAE": 3.4977568193035053,
+        "RMSE": 13.858304109538615,
+        "MAE_congested": 10.421800693925123,
+        "MAE_uncongested": 0.07151971728808275,
+        "P99_abs_error": 23.666666666666668
+      },
+      {
+        "model": "LightGBM",
+        "MAE": 0.8377739819580429,
+        "RMSE": 11.024619053777934,
+        "MAE_congested": 2.0796711073101846,
+        "MAE_uncongested": 0.22344969586185,
+        "P99_abs_error": 11.18305551738842
+      },
+      {
+        "model": "MLP",
+        "MAE": 1.185114245389493,
+        "RMSE": 9.673652188352852,
+        "MAE_congested": 2.7334688282417665,
+        "MAE_uncongested": 0.4192229436983108,
+        "P99_abs_error": 13.328707093497748
+      }
+    ],
+    "any_internal_binding": {
+      "opf": 0.26675,
+      "opf_ci95": [
+        0.2606657997628414,
+        0.2729237883490741
+      ],
+      "surrogate_thresholded_union": 0.2659
+    },
+    "break_even_scenarios": 33888.36115090751
+  },
+  "runtime": [
+    {
+      "method": "DC-OPF, 4 workers (Phase 2 wall)",
+      "seconds": 24.494801426999402,
+      "speed-up vs OPF 4 workers": 1.0,
+      "ms_per_scenario": 1.22474007134997
+    },
+    {
+      "method": "DC-OPF, 1 core (sum of LP times)",
+      "seconds": 82.30221113999869,
+      "speed-up vs OPF 4 workers": 0.29762021077821305,
+      "ms_per_scenario": 4.115110556999935
+    },
+    {
+      "method": "LightGBM + classifier, 4 threads",
+      "seconds": 1.9385364310001023,
+      "speed-up vs OPF 4 workers": 12.6357189038549,
+      "ms_per_scenario": 0.09692682155000512
+    },
+    {
+      "method": "LightGBM + classifier, 1 thread",
+      "seconds": 6.261161612000251,
+      "speed-up vs OPF 4 workers": 3.9121816277753063,
+      "ms_per_scenario": 0.31305808060001256
+    },
+    {
+      "method": "MLP + classifier, 4 threads",
+      "seconds": 0.3555109380004069,
+      "speed-up vs OPF 4 workers": 68.9002750935651,
+      "ms_per_scenario": 0.017775546900020346
+    },
+    {
+      "method": "baseline (merit order)",
+      "seconds": 0.04122126699985529,
+      "speed-up vs OPF 4 workers": 594.2272814439544,
+      "ms_per_scenario": 0.0020610633499927645
+    }
+  ],
+  "hourly_task": {
+    "periods": {
+      "train": [
+        "2025-01-01",
+        "2025-12-24",
+        8592
+      ],
+      "val": [
+        "2026-01-01",
+        "2026-06-23",
+        4176
+      ],
+      "test": [
+        "2026-07-01",
+        "2026-12-31",
+        4416
+      ]
+    },
+    "summary_by_model": [
+      {
+        "model": "baseline (copper plate)",
+        "MAE": 2.6636599235104677,
+        "RMSE": 6.342456345078635,
+        "MAE_congested": 10.309134287661895,
+        "MAE_uncongested": 1.0958268502396864e-15,
+        "P99_abs_error": 21.611111111111114
+      },
+      {
+        "model": "LightGBM",
+        "MAE": 0.1883655822081681,
+        "RMSE": 0.8480059235314457,
+        "MAE_congested": 0.5880823205908121,
+        "MAE_uncongested": 0.04910549106477972,
+        "P99_abs_error": 4.078454050123431
+      },
+      {
+        "model": "MLP",
+        "MAE": 0.2665199491694727,
+        "RMSE": 1.0078899179494656,
+        "MAE_congested": 0.7289105079278212,
+        "MAE_uncongested": 0.10542449037763281,
+        "P99_abs_error": 3.99637912814457
+      }
+    ]
+  },
+  "sweep_mae": {
+    "wind": {
+      "baseline (copper plate)": 4.846534653465349,
+      "LightGBM": 0.4680339192120553,
+      "MLP": 0.9827611713157721
+    },
+    "load": {
+      "baseline (copper plate)": 1.1138613861386144,
+      "LightGBM": 0.3659021157042269,
+      "MLP": 1.0484580261977139
+    }
+  },
+  "sweep_hour": "2026-09-17 19:00:00",
+  "figures": [
+    "reports/figures/surrogate_mc_congestion.png",
+    "reports/figures/surrogate_lmp_ecdf.png",
+    "reports/figures/surrogate_mae_by_regime.png",
+    "reports/figures/surrogate_mae_by_regime_hourly.png",
+    "reports/figures/surrogate_step_wind.png",
+    "reports/figures/surrogate_step_load.png",
+    "reports/figures/surrogate_shap_importance.png",
+    "reports/figures/surrogate_shap_dependence.png",
+    "reports/figures/surrogate_learning_curve.png",
+    "reports/figures/surrogate_runtime.png",
+    "reports/figures/surrogate_pred_vs_true_SOUTH.png"
+  ]
+}
