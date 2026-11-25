@@ -132,3 +132,52 @@ hydro:
 # -----------------------------------------------------------------------------
 congestion_target: {min_share: 0.10, max_share: 0.30}
 binding_tolerance: 1.0e-4   # line is "binding" if |flow| >= s_nom * (1 - tol)
+
+# =============================================================================
+# Phase 2: probabilistic studies
+# =============================================================================
+montecarlo:
+  n_scenarios: 20000        # independent scenario-hours (each one an OPF)
+  seed_offset: 1000         # MC stream = seed + seed_offset (Phase 3 uses others)
+  workers: 4                # parallel processes (one LP per process at a time)
+  chunk: 1000               # scenarios per LP block (same topology only)
+  # Each scenario starts from a uniformly sampled synthetic hour, then perturbs it:
+  load_sigma_system: 0.03   # lognormal system-wide load multiplier (weather/forecast error)
+  load_sigma_bus: 0.01      # extra independent per-bus multiplier
+  wind_logit_sigma: 0.5     # shift of each wind site's CF in logit space
+  solar_sigma: 0.10         # multiplicative solar noise
+  # Forced outages are sampled independently per scenario (state sampling).
+  # outage_rate = probability the element is unavailable in a given hour.
+  # Values are ILLUSTRATIVE; real 240 kV line unavailability is ~0.1-1 %,
+  # so lines sit at the pessimistic end to give enough outage samples.
+  outage_rate_scale: 1.0
+  line_outage_rate:
+    SOUTH-CAL: 0.010
+    SOUTH-RD: 0.012
+    CAL-RD: 0.006
+    RD-EDM: 0.006
+    CAL-EDM: 0.010
+    EDM-NORTH-1: 0.012
+    EDM-NORTH-2: 0.012
+    BC-CAL: 0.020
+  # Generators are split into identical units; available units ~ Binomial(n, 1 - FOR).
+  # Wind/solar forced outages are not modelled separately (inside the CF process).
+  generator_outage:
+    cogen:     {for: 0.04, unit_mw: 200}
+    ccgt:      {for: 0.05, unit_mw: 400}
+    gas_steam: {for: 0.08, unit_mw: 375}
+    peaker:    {for: 0.07, unit_mw: 100}
+    hydro:     {for: 0.03, unit_mw: 150}
+    import:    {for: 0.05, unit_mw: 1000}   # whole intertie derate
+  # Rating sensitivity: rerun a smaller MC with the named corridor's rating scaled
+  rating_sensitivity:
+    enabled: true
+    n_scenarios: 5000
+    scales: [0.90, 0.95, 1.00, 1.05, 1.10]
+    corridors:
+      SOUTH-CAL: [SOUTH-CAL]
+      EDM-NORTH: [EDM-NORTH-1, EDM-NORTH-2]
+
+contingency:
+  workers: 4
+  hours_stride: 1           # 1 = every hour of the 2-year synthetic data

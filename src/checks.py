@@ -31,7 +31,8 @@ def generator_pmax(cfg: dict, inputs: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(cols)
 
 
-def angle_dcopf_hour(cfg: dict, loads: dict[str, float], pmax: dict[str, float], line_limits: bool = True):
+def angle_dcopf_hour(cfg: dict, loads: dict[str, float], pmax: dict[str, float], line_limits: bool = True,
+                     out_lines: tuple[str, ...] = ()):
     """Solve one hour of DC-OPF with bus voltage angles as variables.
 
     min  sum_g c_g p_g
@@ -40,7 +41,7 @@ def angle_dcopf_hour(cfg: dict, loads: dict[str, float], pmax: dict[str, float],
         -F <= B_f theta <= F              (line limits)
          0 <= p <= pmax
     """
-    buses, lines, A, b = susceptance_matrices(cfg)
+    buses, lines, A, b = susceptance_matrices(cfg, out_lines)
     gens = list(pmax)
     G, N, L = len(gens), len(buses), len(lines)
     cost = []
@@ -155,3 +156,41 @@ def check_congestion_target(cfg: dict, res: DispatchResult) -> dict:
     t = cfg["congestion_target"]
     return {"share_hours_any_binding": share, "target": [t["min_share"], t["max_share"]],
             "passed": bool(t["min_share"] <= share <= t["max_share"])}
+
+
+def check_mc_resolve(cfg: dict, scen, res: DispatchResult, n: int = 100, seed: int = 0) -> dict:
+    """Re-solve MC scenarios (half with a line outage) with the angle-based LP,
+    including generator derates, and compare LMPs (where defined) and flows."""
+    rng = np.random.default_rng(seed)
+    with_out = np.flatnonzero(scen.line_out.any(axis=1).to_numpy())
+    without = np.flatnonzero(~scen.line_out.any(axis=1).to_numpy())
+    k = min(n // 2, len(with_out))
+    idx = np.r_[rng.choice(with_out, k, replace=False), rng.choice(without, n - k, replace=False)]
+    pmax = generator_pmax(cfg, scen.inputs)
+    pmax[scen.gen_avail.columns] = pmax[scen.gen_avail.columns] * scen.gen_avail
+    outs = scen.out_lines
+    lmp_err, flow_err = [], []
+    for i in idx:
+        sid = scen.inputs.index[i]
+        loads = {bus: scen.inputs.at[sid, f"load_{bus}"] for bus in load_buses(cfg)}
+        lmp, flow, _ = angle_dcopf_hour(cfg, loads, pmax.loc[sid].to_dict(), out_lines=outs.loc[sid])
+        ref = res.lmp.loc[sid, lmp.index]
+        ok = ref.notna()
+        lmp_err.append(float((lmp[ok] - ref[ok]).abs().max()))
+        flow_err.append(float((flow - res.flow.loc[sid, flow.index]).abs().max()))
+    return {"scenarios_checked": int(len(idx)), "with_line_outage": int(k),
+            "max_abs_lmp_diff": max(lmp_err), "max_abs_flow_diff_mw": max(flow_err),
+            "passed": bool(max(lmp_err) < 1e-3 and max(flow_err) < 1e-2)}
+
+
+def check_switching_paradox(cfg: dict, inputs: pd.DataFrame, line: str, hour) -> dict:
+    """Independently confirm that removing ``line`` lowers cost in ``hour``."""
+    pmax = generator_pmax(cfg, inputs).loc[hour].to_dict()
+    loads = {bus: inputs.at[hour, f"load_{bus}"] for bus in load_buses(cfg)}
+    costs = {}
+    for label, out in (("intact", ()), ("without_line", (line,))):
+        _, _, p = angle_dcopf_hour(cfg, loads, pmax, out_lines=out)
+        c = sum(v * (cfg["voll"] if g.startswith("shed_") else cfg["generators"][g]["marginal_cost"]) for g, v in p.items())
+        costs[label] = float(c)
+    return {"line": line, "hour": str(hour), **costs, "saving_per_hour": costs["intact"] - costs["without_line"],
+            "passed": bool(costs["without_line"] <= costs["intact"] + 1e-6)}

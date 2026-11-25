@@ -15,7 +15,10 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from .grid import build_network, load_buses
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor
+
+from .grid import build_network, islanded_buses, load_buses
 
 
 @dataclass
@@ -80,7 +83,7 @@ def solve_block(
     dispatch = n.generators_t.p[list(n.generators.index)].copy()
     for df in (lmp, flow, loading, binding, dispatch):
         df.columns.name = None
-        df.index.name = "timestamp"
+        df.index.name = inputs.index.name or "timestamp"
     return DispatchResult(lmp, flow, loading, binding.astype(bool), dispatch, time.perf_counter() - t0)
 
 
@@ -96,6 +99,76 @@ def solve_dispatch(cfg: dict, inputs: pd.DataFrame, *, chunk: int | None = None,
     res = DispatchResult.concat(parts)
     res.meta["n_hours"] = len(inputs)
     return res
+
+
+def _solve_task(args):
+    cfg, block, out_lines, avail, kw = args
+    return out_lines, solve_block(cfg, block, out_lines=out_lines, gen_availability=avail, **kw)
+
+
+def solve_many(
+    cfg: dict,
+    inputs: pd.DataFrame,
+    out_lines: pd.Series | None = None,
+    gen_availability: pd.DataFrame | None = None,
+    *,
+    workers: int = 1,
+    chunk: int | None = None,
+    **kw,
+) -> DispatchResult:
+    """Solve many independent rows (hours or MC scenarios), possibly with outages.
+
+    out_lines: per-row tuple of lines that are out of service. Rows sharing a
+        topology are solved together in one LP (as snapshots); different
+        topologies need different networks, because an outaged line must be
+        removed, not set to zero rating.
+    gen_availability: per-row generator availability multipliers (0..1).
+    Results are re-aligned to the full line set (an out-of-service line has
+    flow 0 and is never binding) and to the original row order. The LMP of an
+    islanded bus with no load is undefined and set to NaN.
+    """
+    chunk = chunk or cfg["time"]["solve_chunk_hours"]
+    if out_lines is None:
+        out_lines = pd.Series([()] * len(inputs), index=inputs.index)
+    out_lines = out_lines.map(lambda t: tuple(sorted(t)))
+    tasks = []
+    for topo, idx in out_lines.groupby(out_lines, sort=False).groups.items():
+        for start in range(0, len(idx), chunk):
+            rows = idx[start : start + chunk]
+            avail = gen_availability.loc[rows] if gen_availability is not None else None
+            tasks.append((cfg, inputs.loc[rows], topo, avail, kw))
+    t0 = time.perf_counter()
+    if workers > 1 and len(tasks) > 1:
+        # "spawn", not fork: forking a process that has already run HiGHS can
+        # deadlock the children (inherited solver thread state).
+        with ProcessPoolExecutor(max_workers=workers, mp_context=mp.get_context("spawn")) as ex:
+            outs = list(ex.map(_solve_task, tasks))
+    else:
+        outs = [_solve_task(t) for t in tasks]
+    wall = time.perf_counter() - t0
+
+    all_lines = list(cfg["lines"])
+    parts = []
+    for topo, r in outs:
+        r.flow = r.flow.reindex(columns=all_lines, fill_value=0.0)
+        r.loading = r.loading.reindex(columns=all_lines, fill_value=0.0)
+        r.binding = r.binding.reindex(columns=all_lines, fill_value=False).astype(bool)
+        for bus in islanded_buses(cfg, topo):
+            if cfg["buses"][bus]["load_share"] == 0:
+                r.lmp[bus] = np.nan
+        parts.append(r)
+    res = DispatchResult.concat(parts)
+    for k in ("lmp", "flow", "loading", "binding", "dispatch"):
+        setattr(res, k, getattr(res, k).loc[inputs.index])
+    res.meta.update({"n_lps": len(tasks), "n_topologies": int(out_lines.nunique()), "wall_seconds": wall,
+                     "sum_lp_seconds": res.solve_seconds, "rows": len(inputs)})
+    return res
+
+
+def production_cost(cfg: dict, dispatch: pd.DataFrame) -> pd.Series:
+    """$/h per row, including unserved energy at VOLL."""
+    c = pd.Series({g: (cfg["voll"] if g.startswith("shed_") else cfg["generators"][g]["marginal_cost"]) for g in dispatch})
+    return dispatch.mul(c, axis=1).sum(axis=1)
 
 
 def total_load(cfg: dict, inputs: pd.DataFrame) -> pd.Series:

@@ -61,6 +61,15 @@ def validate(cfg: dict) -> None:
         raise ValueError("load.hourly_shape must have 24 values")
     if len(cfg["hydro"]["monthly_pmax_pu"]) != 12:
         raise ValueError("hydro.monthly_pmax_pu must have 12 values")
+    mc = cfg.get("montecarlo")
+    if mc:
+        missing = set(cfg["lines"]) - set(mc["line_outage_rate"])
+        if missing:
+            raise ValueError(f"montecarlo.line_outage_rate missing lines: {sorted(missing)}")
+        carriers = {g["carrier"] for g in cfg["generators"].values()}
+        unknown = set(mc["generator_outage"]) - carriers
+        if unknown:
+            raise ValueError(f"montecarlo.generator_outage has unknown carriers: {sorted(unknown)}")
 
 
 def data_dir(cfg: dict) -> Path:

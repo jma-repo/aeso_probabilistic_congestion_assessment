@@ -10,7 +10,7 @@ LMP data to learn from. This project therefore:
 4. stores everything in **SQL** and shows it in a **Streamlit** dashboard *(Phase 4)*,
 5. calibrates load and wind/solar shapes against **real AESO data** *(Phase 5)*.
 
-> **Status:** Phase 1 complete. Phases 2–5 are planned (see [Roadmap](#roadmap)).
+> **Status:** Phases 1–2 complete. Phases 3–5 are planned (see [Roadmap](#roadmap)).
 
 > ⚠️ **This is a DC approximation.** DC-OPF assumes lossless lines, flat voltage magnitudes and small angle
 > differences, and ignores reactive power and voltage limits entirely. All capacities, costs and line ratings are
@@ -88,12 +88,14 @@ python -m src.run
 pytest -q
 ```
 
-`python -m src.run` runs every implemented phase (currently Phase 1, ≈1.5 min on 4 cores). Use
-`python -m src.run --phases 1` to run Phase 1 only. `pytest -q` runs 8 correctness tests in about 10 s.
+`python -m src.run` runs every implemented phase (currently Phases 1–2, ≈5 min on 4 cores). Use
+`python -m src.run --phases 2` to run a single phase; Phase 2 reuses Phase 1 outputs, or creates them if they
+are missing. `pytest -q` runs 15 correctness tests in about 35 s.
 
 * Outputs go to `data/` as parquet files; this folder is git-ignored and can be regenerated.
 * Figures and summaries go to `reports/` and are committed.
-* The walkthrough is `notebooks/01_phase1_walkthrough.ipynb`.
+* The walkthroughs are `notebooks/01_phase1_walkthrough.ipynb` and `notebooks/02_phase2_probabilistic.ipynb`.
+* Phase 2 tables are also written as CSV files to `reports/tables/`.
 
 ### Repository layout
 
@@ -102,11 +104,13 @@ config.yaml          all parameters (seed, network, generators, weather/load pro
 src/config.py        load + validate config
 src/synth.py         synthetic temperature, load, wind, solar, hydro
 src/grid.py          PyPSA network builder; PTDF matrix
-src/simulate.py      block-wise hourly DC-OPF, LMP/flow/binding extraction
+src/simulate.py      block-wise DC-OPF; solve_many(): group by topology, solve in parallel
+src/montecarlo.py    scenario sampling (uncertainty + forced outages), Wilson CIs, sensitivities
+src/contingency.py   N-1: PTDF security screen + re-dispatch economic impact, ranking
 src/checks.py        sanity checks incl. an independent angle-based DC-OPF
 src/plots.py         figures
 src/run.py           one-command pipeline
-tests/               pytest suite (two-town, loop flow, determinism, physics)
+tests/               pytest suite (two-town, loop flow, outages vs zero rating, islanding, PTDF screen, ...)
 notebooks/           walkthrough
 reports/             generated summaries and figures (committed)
 ```
@@ -223,12 +227,162 @@ agreement therefore tests both the formulation and the way results are extracted
 
 ---
 
+## Phase 2 — probabilistic studies
+
+Full auto-generated output: [`reports/phase2_summary.md`](reports/phase2_summary.md) (CSV files in `reports/tables/`).
+
+### Monte Carlo set-up
+
+Each of the **20,000 scenarios** is one independent "possible hour", drawn in three steps:
+
+1. **Pick a base hour** uniformly from the two synthetic years. This keeps temperature, calendar, load and
+   renewables consistent with each other.
+2. **Perturb it.** Apply a lognormal system load multiplier (σ = 3%) and a per-bus multiplier (σ = 1%), shift wind
+   in logit space (σ = 0.5), and add multiplicative solar noise (σ = 10%).
+3. **Sample forced outages (state sampling).**
+   * Each line is out with probability *q*, set between 0.5% and 2% per line (illustrative, at the pessimistic end).
+   * Each thermal, hydro or import plant is split into identical units. The number of available units is
+     ~ Binomial(n, 1 − FOR), with FOR from 3% to 8% by technology. This takes about 740 MW of generation out on
+     average.
+
+Scenarios are drawn i.i.d., so every probability carries a **95% Wilson interval**. Scenarios that share a topology
+(the same set of lines out) are solved together in one LP. The 20,000 scenarios fall into **33 distinct
+topologies**, solved as 51 LPs on 4 worker processes.
+
+**Solve time for the full Monte Carlo study: ≈21–26 s wall-clock** (≈1.1–1.3 ms per scenario on 4 cores; the
+range is run-to-run variation, including process start-up). The sum of the individual LP times is 82–88 s, about
+4 ms per scenario on a single core. This is the benchmark the Phase 3
+surrogates have to beat.
+
+An independent check re-solved 100 scenarios (half with a line outage, all with generator derates) using the angle
+formulation in scipy. It matches PyPSA to 2e-13 \$/MWh.
+
+### Results
+
+![MC congestion probability](reports/figures/mc_congestion_probability.png)
+
+| Line | Deterministic share (no outages) | **MC P(at limit)** [95% CI] | Expected h/yr | P(at limit \| any line out) |
+|---|---:|---:|---:|---:|
+| SOUTH–CAL | 22.1% | **22.3%** [21.7, 22.9] | 1,954 | 23.6% |
+| BC–CAL (intertie) | 3.4% | **7.0%** [6.7, 7.4] | 617 | 10.6% |
+| EDM–NORTH-1 | 1.5% | **3.2%** [2.9, 3.4] | 277 | 16.1% |
+| EDM–NORTH-2 | 1.5% | **3.0%** [2.8, 3.3] | 266 | 14.5% |
+| SOUTH–RD | 0.0% | **0.6%** [0.5, 0.7] | 51 | 7.1% |
+| CAL–EDM | 0.0% | **0.3%** [0.2, 0.4] | 26 | 3.6% |
+| RD–EDM, CAL–RD | 0.0% | ≈0% | <1 | ≈0% |
+
+* **P(≥1 internal line at limit) = 26.7%** [26.1, 27.3], which is 2,337 h/yr. Including the BC intertie it is
+  33.1% (2,898 h/yr). The deterministic run gave 23.7% and 27.0%.
+* **SOUTH–CAL congestion is driven by weather, not reliability.** Adding outages and uncertainty barely changes it
+  (22.1% → 22.3%): it is set by how often the south is windy.
+* **Outages double congestion on the BC intertie and the North corridor.**
+  * The intertie doubles because thermal outages push Alberta prices above the \$55 import offer.
+  * The North corridor doubles because one circuit out leaves the other at its limit. P(binding) is 2% with all
+    lines in service and 16% with a line out.
+* **LMP distribution.** Outages create a price tail. P90 rises from \$50 to \$55, P(LMP ≥ \$100) from 0.1% to
+  about 1.2%, and mean prices rise by about \$2. SOUTH is the most dispersed bus: P10 \$0.5, P50 \$45, P90 \$55.
+  The tail is still far thinner than real Alberta prices (see the Phase 1 limitations).
+* **Adequacy (a by-product of the study).**
+  * LOLE is **4.8 h/yr** [2.7, 8.6] and expected unserved energy (EUE) is about 1,400 MWh/yr.
+  * Both rest on only 11 events in 20,000 scenarios, so the intervals are wide. Rare-event methods such as
+    importance sampling or cross-entropy would tighten them, and are listed as a next step.
+  * About 80% of the unserved energy is in **SOUTH**, which has no local thermal generation. It happens when a
+    southern line is out on a winter evening with no wind or sun.
+
+![LMP intervals](reports/figures/mc_lmp_intervals.png)
+![LMP ECDF](reports/figures/mc_lmp_ecdf.png)
+
+**Convergence.** The plot below shows how many samples are enough. SOUTH–CAL's estimate settles within about
+±0.6 percentage points after 20,000 scenarios. Rare lines such as CAL–EDM (0.3%) still have a relative
+uncertainty of about 30%.
+
+![convergence](reports/figures/mc_convergence.png)
+
+### Rating sensitivity (same scenarios at every rating)
+
+The first 5,000 scenarios are re-solved with one corridor's rating scaled. Because every rating uses the same
+scenarios (common random numbers), the *differences* between ratings contain no sampling noise.
+
+![rating sensitivity](reports/figures/rating_sensitivity.png)
+
+* **SOUTH–CAL responds smoothly.** Each +5% (80 MW) of rating removes about 2 percentage points of congestion
+  probability (about 180 h/yr) and saves about \$10M/yr in production cost. This is the kind of number a
+  transmission-upgrade case would use.
+* **The EDM–NORTH corridor sits on a cliff.** −5% of rating raises congestion from 4% to 24%, and −10% raises it to
+  49%. Above the base rating, the only congestion left (2%) comes from single-circuit outages.
+  * The North exports a nearly constant surplus, so whether the corridor binds is close to a yes/no function of its
+    rating.
+  * Real ratings depend on ambient temperature. A deterministic rating assumption could therefore badly mis-state
+    congestion on this kind of corridor, which argues for probabilistic or seasonal ratings.
+
+### N-1 contingency analysis
+
+Each of the 8 lines is removed in turn, over every one of the 17,520 hours, and each case is viewed two ways:
+
+* **Security screen:** the pre-contingency market dispatch is kept, and the new flows are computed with the PTDF
+  of the reduced network. This answers "does anything overload the instant the line trips?"
+* **Economic impact:** a full DC-OPF re-dispatch without the line, compared with the intact case. This answers
+  "what does it cost, and how do LMPs move, if the line is out for the hour?"
+
+Together that is 140,160 re-dispatch OPFs, solved in 82 s.
+
+![N-1 security](reports/figures/n1_security.png)
+
+| Rank | Outaged line | Hours with post-contingency overload | Worst overload | Δ production cost (M\$/yr) | Mean \|ΔLMP\| (\$/MWh) | Unserved energy after re-dispatch (MWh/yr) |
+|---:|---|---:|---|---:|---:|---:|
+| 1 | EDM–NORTH-1 (or -2) | **99%** | other circuit 200% | **+154** | **10.3** | 486 |
+| 3 | CAL–RD | 64% | SOUTH–CAL 142% | +25 | 3.5 | 0 |
+| 4 | RD–EDM | 55% | CAL–EDM 175% | +15 | 3.8 | 0 |
+| 5 | SOUTH–CAL | 40% | SOUTH–RD **241%** | +141 | 3.1 | **1,600** |
+| 6 | SOUTH–RD | 32% | SOUTH–CAL 166% | +72 | 1.8 | 0 |
+| 7 | CAL–EDM | 22% | SOUTH–CAL 110% | **−2.4** | 0.8 | 0 |
+| — | BC–CAL | islands BC: loses up to 800 MW of import | — | +5 | 1.0 | 0 |
+
+![ΔLMP heatmap](reports/figures/n1_dlmp_heatmap.png)
+
+How to read this:
+
+* **The base case is not N-1 secure, by construction.** The market dispatch uses thermal ratings and no
+  contingency constraints, which is not security-constrained OPF (SCOPF). On the North double circuit, losing one
+  circuit doubles the flow on the other in almost every hour.
+  * In real operations, the North corridor would be dispatched to an N-1-secure operating limit, close to one
+    circuit's rating, rather than the sum of both.
+  * This is the single most important result of the screen. Adding these contingency constraints (SCOPF) would
+    raise congestion sharply, and it is the first modelling next step.
+* **Security ranking and economic ranking differ.**
+  * CAL–RD causes frequent overloads (security rank 3) but is cheap to re-dispatch around (economic rank 5).
+  * SOUTH–CAL is the reverse: fewer overload hours, but the largest overload (241%), large cost (+\$141M/yr) and
+    **unserved energy in the South**, because the remaining 1,100 MW SOUTH–RD line cannot carry the South's
+    winter-evening load when there is no wind.
+  * Both views are needed. The ranked table includes both ranks.
+* **Removing a line can *lower* cost** (a Braess / transmission-switching effect).
+  * CAL–EDM out is cheaper than the intact network in 18.7% of hours and −\$2.4M/yr overall. RD–EDM and CAL–RD
+    show the same effect in some hours.
+  * In a meshed DC network a line also adds a KVL constraint. Removing it can relieve loop flow on a binding line.
+  * This is not a numerical artefact: the best hour for each case was re-solved independently and confirmed
+    (CAL–EDM saves \$4,344/h). Operators use the same effect deliberately (optimal transmission switching), but only
+    within N-1 security limits.
+* **Modelling note.** Outaged lines are *removed* from the network. A test shows that setting the rating to zero
+  gives a different (and wrong) LMP, because the KVL constraint stays in the model.
+
+### Additional limitations of Phase 2
+
+* Outages are sampled independently, hour by hour. There are no repair times, common-mode failures or weather-driven
+  correlated outages, and no planned maintenance.
+* Outage rates and FORs are illustrative. Wind and solar have no separate outage model.
+* N-1 covers lines only, not generators or the 800 MW intertie import.
+* Base-case flows are not secured against contingencies (see the SCOPF note above). Re-dispatch is economic and
+  costless to execute, with no ramp limits.
+* Unserved energy estimates rest on few events and have wide intervals.
+
+---
+
 ## Roadmap
 
 | Phase | Content | Status |
 |---|---|---|
 | 1 | Synthetic grid, hourly DC-OPF/LMP simulator, sanity checks | ✅ done |
-| 2 | Monte Carlo (load, wind, line and generator outages); N-1 ranking; solve-time budget | planned |
+| 2 | Monte Carlo (load, wind, line and generator outages); N-1 ranking; solve-time budget | ✅ done |
 | 3 | Surrogates: copper-plate baseline, per-bus LightGBM + SHAP, multi-output MLP, line-congestion classifier; surrogate MC versus full OPF | planned |
 | 4 | SQLAlchemy store (SQLite by default; Postgres/SQL Server through the connection string); Streamlit dashboard | planned |
 | 5 | AESO API: real AIL load shape, wind/solar shapes, calibration against pool price (needs `AESO_API_KEY`) | after key is confirmed |
@@ -240,3 +394,7 @@ agreement therefore tests both the formulation and the way results are extracted
 * Calibrating costs from AESO merit-order data.
 * Forced outage rates from AIES generation capacity data.
 * Intertie limits taken from AESO intertie reports.
+* Security-constrained OPF: add N-1 constraints to the market dispatch, and use probabilistic or seasonal line
+  ratings.
+* Rare-event Monte Carlo (importance sampling or cross-entropy) for adequacy metrics, and sequential Monte Carlo with
+  repair times.

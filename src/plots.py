@@ -45,7 +45,8 @@ def _save(fig, out: Path, name: str) -> Path:
     return p
 
 
-def network_diagram(cfg: dict, out: Path, line_values: pd.Series | None = None, value_label: str = "") -> Path:
+def network_diagram(cfg: dict, out: Path, line_values: pd.Series | None = None, value_label: str = "",
+                    name: str | None = None) -> Path:
     """Bus/line map. Optionally colour lines by a value in [0,1] (e.g. share of hours binding)."""
     style()
     fig, ax = plt.subplots(figsize=(7.6, 7.6))
@@ -56,17 +57,17 @@ def network_diagram(cfg: dict, out: Path, line_values: pd.Series | None = None, 
     cmap = matplotlib.colors.LinearSegmentedColormap.from_list("seq", SEQ)
     vmax = max(float(line_values.max()), 1e-9) if line_values is not None else 1
     parallel = {}
-    for name, ln in cfg["lines"].items():
+    for line_name, ln in cfg["lines"].items():
         key = tuple(sorted((ln["bus0"], ln["bus1"])))
-        parallel.setdefault(key, []).append(name)
+        parallel.setdefault(key, []).append(line_name)
     for key, names in parallel.items():
         (x0, y0), (x1, y1) = pos[key[0]], pos[key[1]]
         dx, dy = x1 - x0, y1 - y0
         nrm = np.hypot(dx, dy)
         ox, oy = -dy / nrm, dx / nrm
-        for k, name in enumerate(names):
+        for k, line in enumerate(names):
             off = (k - (len(names) - 1) / 2) * 0.07
-            c = cmap(float(line_values[name]) / vmax) if line_values is not None else "#9c9c9c"
+            c = cmap(float(line_values[line]) / vmax) if line_values is not None else "#9c9c9c"
             ax.plot([x0 + ox * off, x1 + ox * off], [y0 + oy * off, y1 + oy * off], color=c, lw=4, solid_capstyle="round", zorder=1)
         rating = "+".join(str(cfg["lines"][n]["s_nom"]) for n in names)
         lab = f"{rating} MW"
@@ -99,7 +100,7 @@ def network_diagram(cfg: dict, out: Path, line_values: pd.Series | None = None, 
     ax.set_title(ttl)
     ax.set_xlim(-3.3, 3.3)
     ax.set_ylim(-1.3, 4.9)
-    return _save(fig, out, "network" if line_values is None else "network_congestion")
+    return _save(fig, out, name or ("network" if line_values is None else "network_congestion"))
 
 
 def inputs_overview(cfg: dict, inputs: pd.DataFrame, out: Path) -> Path:
@@ -192,3 +193,141 @@ def binding_by_line(cfg: dict, res: DispatchResult, out: Path) -> Path:
     ax.set_title(f"Binding frequency by line (≥1 line binding in {any_share:.1%} of hours)", loc="left")
     ax.grid(axis="y", visible=False)
     return _save(fig, out, "binding_by_line")
+
+
+# ---------------------------------------------------------------------------
+# Phase 2
+# ---------------------------------------------------------------------------
+DIVERGING = ["#1757ac", "#519ced", "#b6d5f8", "#efefef", "#f7c4c4", "#eb6263", "#b02a2b"]
+
+
+def mc_congestion_probability(table: pd.DataFrame, out: Path) -> Path:
+    """Deterministic 2-year share vs Monte Carlo probability (95% Wilson CI) per line."""
+    style()
+    t = table.sort_values("p_congested")
+    y = np.arange(len(t))
+    fig, ax = plt.subplots(figsize=(7.8, 4.2))
+    h = 0.36
+    ax.barh(y + h / 2, t["deterministic_share"], height=h, color=SERIES[0], label="deterministic (2 yr, no outages)")
+    err = np.vstack([t["p_congested"] - t["ci95_low"], t["ci95_high"] - t["p_congested"]])
+    ax.barh(y - h / 2, t["p_congested"], height=h, color=SERIES[1], label="Monte Carlo (outages + uncertainty)",
+            xerr=err, error_kw=dict(ecolor=TEXT, lw=1, capsize=2))
+    for i, (d, p) in enumerate(zip(t["deterministic_share"], t["p_congested"])):
+        ax.text(max(d, p) + 0.012, i, f"{p:.1%}", va="center", fontsize=8, color=TEXT)
+    ax.set_yticks(y, t.index)
+    ax.xaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0))
+    ax.set_xlabel("Probability a line is at its limit in a given hour")
+    ax.set_title("Per-line congestion probability", loc="left", pad=26)
+    ax.legend(loc="lower left", bbox_to_anchor=(0, 1.0), ncol=2, fontsize=8.5)
+    ax.grid(axis="y", visible=False)
+    return _save(fig, out, "mc_congestion_probability")
+
+
+def mc_lmp_intervals(q_det: pd.DataFrame, q_mc: pd.DataFrame, out: Path) -> Path:
+    """P10-P90 range with P50 marker per bus: deterministic vs Monte Carlo."""
+    style()
+    buses = [b for b in BUS_ORDER if b in q_mc.index]
+    fig, ax = plt.subplots(figsize=(8, 4.2))
+    for k, (q, lab, col) in enumerate(((q_det, "deterministic", SERIES[0]), (q_mc, "Monte Carlo", SERIES[1]))):
+        x = np.arange(len(buses)) + (k - 0.5) * 0.28
+        ax.vlines(x, q.loc[buses, "P10"], q.loc[buses, "P90"], color=col, lw=5, label=f"{lab}: P10–P90")
+        ax.scatter(x, q.loc[buses, "P50"], s=46, color="white", edgecolor=col, linewidth=2, zorder=3,
+                   label=f"{lab}: P50")
+    ax.set_xticks(np.arange(len(buses)), buses)
+    ax.set_ylabel("LMP ($/MWh)")
+    ax.set_title("LMP distribution by bus (P10 / P50 / P90)", loc="left", pad=26)
+    ax.legend(loc="lower left", bbox_to_anchor=(0, 1.0), ncol=4, fontsize=8)
+    ax.grid(axis="x", visible=False)
+    return _save(fig, out, "mc_lmp_intervals")
+
+
+def mc_lmp_ecdf(res: DispatchResult, out: Path, xmax: float = 160) -> Path:
+    style()
+    fig, ax = plt.subplots(figsize=(8, 4.4))
+    for b in [b for b in BUS_ORDER if b in res.lmp]:
+        v = np.sort(res.lmp[b].dropna().to_numpy())
+        ax.step(v, np.arange(1, len(v) + 1) / len(v), where="post", color=BUS_COLOR[b], label=b, lw=1.6)
+    tail = float((res.lmp.drop(columns="BC", errors="ignore") > xmax).any(axis=1).mean())
+    ax.set_xlim(-2, xmax)
+    ax.set_xlabel(f"LMP ($/MWh); {tail:.2%} of scenarios exceed ${xmax:.0f} at some bus (up to the $999.99 cap)")
+    ax.set_ylabel("Share of scenarios ≤ x")
+    ax.yaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0))
+    ax.set_title("Monte Carlo LMP distribution (empirical CDF)", loc="left", pad=26)
+    ax.legend(loc="lower left", bbox_to_anchor=(0, 1.0), ncol=6, fontsize=8.5)
+    return _save(fig, out, "mc_lmp_ecdf")
+
+
+def mc_convergence(conv: pd.DataFrame, out: Path) -> Path:
+    style()
+    fig, ax = plt.subplots(figsize=(8, 4.2))
+    for k, (line, d) in enumerate(conv.groupby("line", sort=False)):
+        d = d[d["n"] >= 50]
+        ax.fill_between(d["n"], d["lo"], d["hi"], color=SERIES[k], alpha=0.18, lw=0)
+        ax.plot(d["n"], d["p"], color=SERIES[k], lw=1.6, label=line)
+    ax.set_xscale("log")
+    ax.yaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0))
+    ax.set_xlabel("Number of Monte Carlo scenarios (log scale)")
+    ax.set_ylabel("Estimated P(line at limit)")
+    ax.set_title("Convergence of congestion probability (bands = 95% Wilson CI)", loc="left", pad=26)
+    ax.legend(loc="lower left", bbox_to_anchor=(0, 1.0), ncol=4, fontsize=8.5)
+    return _save(fig, out, "mc_convergence")
+
+
+def n1_security(ranked: pd.DataFrame, out: Path) -> Path:
+    style()
+    t = ranked.iloc[::-1]
+    fig, ax = plt.subplots(figsize=(7.8, 4.0))
+    vals = t["share_hours_overload"].fillna(0)
+    ax.barh(t.index, vals, color=[SERIES[0] if not isl else "#c8c8c8" for isl in t["islands"]], height=0.6)
+    for i, (idx, r) in enumerate(t.iterrows()):
+        if r["islands"]:
+            txt = f"islands {r['islands']}: loses up to {r['islanded_injection_max_mw']:.0f} MW"
+            ax.text(0.01, i, txt, va="center", fontsize=8, color=TEXT)
+        else:
+            ax.text(vals.iloc[i] + 0.01, i, f"{vals.iloc[i]:.0%}  (worst: {r['worst_line']} {r['max_post_loading']:.0%})",
+                    va="center", fontsize=8, color=TEXT)
+    ax.set_xlim(0, 1.45)
+    ax.xaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0))
+    ax.set_xticks([0, 0.25, 0.5, 0.75, 1.0])
+    ax.set_xlabel("Share of hours with ≥1 post-contingency overload (pre-contingency dispatch)")
+    ax.set_title("N-1 security screen by outaged line", loc="left")
+    ax.grid(axis="y", visible=False)
+    return _save(fig, out, "n1_security")
+
+
+def n1_dlmp_heatmap(dlmp: pd.DataFrame, out: Path) -> Path:
+    style()
+    cols = [b for b in BUS_ORDER if b in dlmp.columns]
+    d = dlmp[cols]
+    vmax = float(np.abs(d.to_numpy()).max())
+    cmap = matplotlib.colors.LinearSegmentedColormap.from_list("div", DIVERGING)
+    fig, ax = plt.subplots(figsize=(7, 4.4))
+    im = ax.imshow(d.to_numpy(), cmap=cmap, vmin=-vmax, vmax=vmax, aspect="auto")
+    ax.set_xticks(range(len(cols)), cols)
+    ax.set_yticks(range(len(d)), d.index)
+    ax.grid(False)
+    for i in range(d.shape[0]):
+        for j in range(d.shape[1]):
+            v = d.iat[i, j]
+            ax.text(j, i, f"{v:+.1f}", ha="center", va="center", fontsize=8,
+                    color="white" if abs(v) > 0.6 * vmax else TEXT)
+    cb = fig.colorbar(im, ax=ax, fraction=0.04, pad=0.02)
+    cb.outline.set_visible(False)
+    cb.set_label("$/MWh")
+    ax.set_title("Mean LMP change after re-dispatch, by outaged line", loc="left")
+    return _save(fig, out, "n1_dlmp_heatmap")
+
+
+def rating_sensitivity_plot(sens: pd.DataFrame, out: Path) -> Path:
+    style()
+    fig, ax = plt.subplots(figsize=(7.6, 4.2))
+    for k, (corr, d) in enumerate(sens.groupby("corridor", sort=False)):
+        ax.fill_between(d["rating_scale"], d["ci95_low"], d["ci95_high"], color=SERIES[k], alpha=0.18, lw=0)
+        ax.plot(d["rating_scale"], d["p_corridor_congested"], color=SERIES[k], marker="o", ms=6, label=corr)
+    ax.xaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0))
+    ax.yaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0))
+    ax.set_xlabel("Corridor rating relative to base")
+    ax.set_ylabel("P(corridor at limit)")
+    ax.set_title("Rating sensitivity (same scenarios for every rating)", loc="left", pad=26)
+    ax.legend(loc="lower left", bbox_to_anchor=(0, 1.0), ncol=2)
+    return _save(fig, out, "rating_sensitivity")

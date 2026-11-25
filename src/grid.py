@@ -44,13 +44,14 @@ def build_network(
     line_limits: bool = True,
     out_lines: tuple[str, ...] = (),
     gen_availability: pd.DataFrame | None = None,
-    line_rating_scale: float = 1.0,
+    line_rating_scale: float | dict[str, float] = 1.0,
 ) -> pypsa.Network:
     """Return a PyPSA network over ``inputs.index`` snapshots.
 
     gen_availability: optional DataFrame (snapshots x generator names) of 0/1
         multipliers on p_max_pu (forced outages).
-    line_rating_scale: multiply all line ratings (used for sensitivity/tuning).
+    line_rating_scale: multiply line ratings: one float for all lines, or a
+        {line: scale} dict (unlisted lines keep 1.0). Used for sensitivities.
     """
     n = pypsa.Network()
     n.set_snapshots(inputs.index)
@@ -61,7 +62,8 @@ def build_network(
     for name, ln in cfg["lines"].items():
         if name in out_lines:
             continue
-        s_nom = ln["s_nom"] * line_rating_scale if line_limits else UNLIMITED_MW
+        scale = line_rating_scale.get(name, 1.0) if isinstance(line_rating_scale, dict) else line_rating_scale
+        s_nom = ln["s_nom"] * scale if line_limits else UNLIMITED_MW
         n.add("Line", name, bus0=ln["bus0"], bus1=ln["bus1"], x=ln["x"], r=0.0, s_nom=s_nom)
 
     for bus in load_buses(cfg):
@@ -118,3 +120,27 @@ def ptdf(cfg: dict, out_lines: tuple[str, ...] = (), slack: str | None = None) -
     H = np.zeros((len(lines), len(buses)))
     H[:, keep] = Bf[:, keep] @ np.linalg.inv(Bbus[np.ix_(keep, keep)])
     return pd.DataFrame(H, index=lines, columns=buses)
+
+
+def islanded_buses(cfg: dict, out_lines: tuple[str, ...] = ()) -> set[str]:
+    """Buses not connected to the largest island once ``out_lines`` are removed."""
+    adj: dict[str, set[str]] = {b: set() for b in cfg["buses"]}
+    for name, ln in cfg["lines"].items():
+        if name not in out_lines:
+            adj[ln["bus0"]].add(ln["bus1"])
+            adj[ln["bus1"]].add(ln["bus0"])
+    seen: set[str] = set()
+    islands = []
+    for start in adj:
+        if start in seen:
+            continue
+        comp, stack = set(), [start]
+        while stack:
+            b = stack.pop()
+            if b not in comp:
+                comp.add(b)
+                stack.extend(adj[b] - comp)
+        seen |= comp
+        islands.append(comp)
+    main = max(islands, key=len)
+    return set(cfg["buses"]) - main

@@ -1,0 +1,627 @@
+{
+  "monte_carlo": {
+    "n_scenarios": 20000,
+    "n_lps": 51,
+    "n_topologies": 33,
+    "wall_seconds": 25.875562114999866,
+    "sum_lp_seconds": 88.10610675499902,
+    "ms_per_scenario_wall": 1.2937781057499933,
+    "workers": 4,
+    "share_scenarios_with_line_outage": 0.08225,
+    "mean_unavailable_generation_mw": 738.9125,
+    "any_binding": {
+      "internal_lines": {
+        "p": 0.26675,
+        "ci95": [
+          0.2606657997628414,
+          0.2729237883490741
+        ],
+        "expected_hours_per_year": 2336.73
+      },
+      "all_lines_incl_intertie": {
+        "p": 0.33085,
+        "ci95": [
+          0.3243619665464968,
+          0.33740300163841425
+        ],
+        "expected_hours_per_year": 2898.2459999999996
+      }
+    },
+    "adequacy": {
+      "lolp": 0.00055,
+      "lolp_ci95": [
+        0.0003071453834863847,
+        0.0009846864814489987
+      ],
+      "lole_hours_per_year": 4.8180000000000005,
+      "eue_mwh_per_year": 1413.9302790733248,
+      "eue_ci95": [
+        267.6359943514169,
+        2560.224563795233
+      ]
+    },
+    "economics": {
+      "expected_production_cost_musd_per_year": 2195.354723561688,
+      "expected_congestion_rent_musd_per_year": 245.28774555172808,
+      "min_congestion_rent_per_hour": -2.2364723326023456e-10
+    },
+    "deterministic_economics": {
+      "expected_production_cost_musd_per_year": 2142.7517974882117,
+      "expected_congestion_rent_musd_per_year": 221.91099074074074,
+      "min_congestion_rent_per_hour": -9.015105291356108e-12
+    }
+  },
+  "line_congestion": [
+    {
+      "line": "SOUTH-CAL",
+      "deterministic_share": 0.2214041095890411,
+      "p_congested": 0.2231,
+      "ci95_low": 0.21738351754900476,
+      "ci95_high": 0.22892283592661966,
+      "expected_hours_per_year": 1954.356,
+      "p_congested_all_lines_in": 0.22190138926722963,
+      "p_congested_any_line_out": 0.2364741641337386,
+      "p_out_of_service": 0.0093
+    },
+    {
+      "line": "BC-CAL",
+      "deterministic_share": 0.03367579908675799,
+      "p_congested": 0.0704,
+      "ci95_low": 0.06693639889510648,
+      "ci95_high": 0.07402860454703238,
+      "expected_hours_per_year": 616.7040000000001,
+      "p_congested_all_lines_in": 0.06717515663307001,
+      "p_congested_any_line_out": 0.10638297872340426,
+      "p_out_of_service": 0.01975
+    },
+    {
+      "line": "EDM-NORTH-1",
+      "deterministic_share": 0.015296803652968037,
+      "p_congested": 0.03165,
+      "ci95_low": 0.0293122118551876,
+      "ci95_high": 0.03416767492815905,
+      "expected_hours_per_year": 277.25399999999996,
+      "p_congested_all_lines_in": 0.020049032961046036,
+      "p_congested_any_line_out": 0.16109422492401215,
+      "p_out_of_service": 0.0109
+    },
+    {
+      "line": "EDM-NORTH-2",
+      "deterministic_share": 0.015296803652968037,
+      "p_congested": 0.03035,
+      "ci95_low": 0.02806117055640326,
+      "ci95_high": 0.03281921553903552,
+      "expected_hours_per_year": 265.866,
+      "p_congested_all_lines_in": 0.020049032961046036,
+      "p_congested_any_line_out": 0.1452887537993921,
+      "p_out_of_service": 0.01225
+    },
+    {
+      "line": "SOUTH-RD",
+      "deterministic_share": 0.0,
+      "p_congested": 0.00585,
+      "ci95_low": 0.004883820509248396,
+      "ci95_high": 0.007005975698695984,
+      "expected_hours_per_year": 51.246,
+      "p_congested_all_lines_in": 5.4481067828929447e-05,
+      "p_congested_any_line_out": 0.07051671732522796,
+      "p_out_of_service": 0.0115
+    },
+    {
+      "line": "CAL-EDM",
+      "deterministic_share": 0.0,
+      "p_congested": 0.00295,
+      "ci95_low": 0.00228784854220248,
+      "ci95_high": 0.00380306151579358,
+      "expected_hours_per_year": 25.842,
+      "p_congested_all_lines_in": 0.0,
+      "p_congested_any_line_out": 0.035866261398176294,
+      "p_out_of_service": 0.01085
+    },
+    {
+      "line": "RD-EDM",
+      "deterministic_share": 0.0,
+      "p_congested": 0.0001,
+      "ci95_low": 2.742346122944835e-05,
+      "ci95_high": 0.00036458124250705794,
+      "expected_hours_per_year": 0.876,
+      "p_congested_all_lines_in": 0.0,
+      "p_congested_any_line_out": 0.0012158054711246201,
+      "p_out_of_service": 0.0055
+    },
+    {
+      "line": "CAL-RD",
+      "deterministic_share": 0.0,
+      "p_congested": 0.0,
+      "ci95_low": 0.0,
+      "ci95_high": 0.00019204311235897808,
+      "expected_hours_per_year": 0.0,
+      "p_congested_all_lines_in": 0.0,
+      "p_congested_any_line_out": 0.0,
+      "p_out_of_service": 0.00535
+    }
+  ],
+  "lmp_quantiles_mc": [
+    {
+      "bus": "NORTH",
+      "P10": 40.0,
+      "P50": 45.0,
+      "P90": 55.0,
+      "P99": 65.0,
+      "mean": 47.01627259469697,
+      "p_lmp_ge_100": 0.0094,
+      "p_lmp_at_cap": 0.00025,
+      "share_undefined_islanded": 0.0
+    },
+    {
+      "bus": "EDM",
+      "P10": 41.0,
+      "P50": 45.0,
+      "P90": 55.0,
+      "P99": 120.0,
+      "mean": 47.8510640189394,
+      "p_lmp_ge_100": 0.01115,
+      "p_lmp_at_cap": 0.00035,
+      "share_undefined_islanded": 0.0
+    },
+    {
+      "bus": "RD",
+      "P10": 36.5,
+      "P50": 45.0,
+      "P90": 55.0,
+      "P99": 120.0,
+      "mean": 46.973214137917644,
+      "p_lmp_ge_100": 0.0119,
+      "p_lmp_at_cap": 0.00035,
+      "share_undefined_islanded": 0.0
+    },
+    {
+      "bus": "CAL",
+      "P10": 42.0,
+      "P50": 48.777777777777786,
+      "P90": 55.0,
+      "P99": 120.0,
+      "mean": 49.852721152777775,
+      "p_lmp_ge_100": 0.012,
+      "p_lmp_at_cap": 0.00035,
+      "share_undefined_islanded": 0.0
+    },
+    {
+      "bus": "SOUTH",
+      "P10": 0.5,
+      "P50": 44.99999999999999,
+      "P90": 55.0,
+      "P99": 120.0,
+      "mean": 39.29854236324786,
+      "p_lmp_ge_100": 0.01215,
+      "p_lmp_at_cap": 0.00055,
+      "share_undefined_islanded": 0.0
+    },
+    {
+      "bus": "BC",
+      "P10": 42.0,
+      "P50": 48.777777777777786,
+      "P90": 55.0,
+      "P99": 55.0,
+      "mean": 48.30914068123211,
+      "p_lmp_ge_100": 0.00175,
+      "p_lmp_at_cap": 0.0002,
+      "share_undefined_islanded": 0.01975
+    }
+  ],
+  "lmp_quantiles_deterministic": [
+    {
+      "bus": "NORTH",
+      "P10": 40.0,
+      "P50": 45.0,
+      "P90": 49.99999999999999,
+      "P99": 65.0,
+      "mean": 45.260673515981736,
+      "p_lmp_ge_100": 0.0005136986301369863,
+      "p_lmp_at_cap": 0.0,
+      "share_undefined_islanded": 0.0
+    },
+    {
+      "bus": "EDM",
+      "P10": 40.0,
+      "P50": 45.0,
+      "P90": 49.99999999999999,
+      "P99": 65.0,
+      "mean": 45.312100456621,
+      "p_lmp_ge_100": 0.0005136986301369863,
+      "p_lmp_at_cap": 0.0,
+      "share_undefined_islanded": 0.0
+    },
+    {
+      "bus": "RD",
+      "P10": 36.5,
+      "P50": 45.0,
+      "P90": 50.0,
+      "P99": 65.0,
+      "mean": 44.360419837645864,
+      "p_lmp_ge_100": 0.0005136986301369863,
+      "p_lmp_at_cap": 0.0,
+      "share_undefined_islanded": 0.0
+    },
+    {
+      "bus": "CAL",
+      "P10": 42.0,
+      "P50": 45.0,
+      "P90": 54.88888888888889,
+      "P99": 65.0,
+      "mean": 47.21546169457128,
+      "p_lmp_ge_100": 0.0005136986301369863,
+      "p_lmp_at_cap": 0.0,
+      "share_undefined_islanded": 0.0
+    },
+    {
+      "bus": "SOUTH",
+      "P10": 0.5,
+      "P50": 44.99999999999999,
+      "P90": 50.0,
+      "P99": 65.0,
+      "mean": 36.74697488584475,
+      "p_lmp_ge_100": 0.0005136986301369863,
+      "p_lmp_at_cap": 0.0,
+      "share_undefined_islanded": 0.0
+    },
+    {
+      "bus": "BC",
+      "P10": 42.0,
+      "P50": 45.0,
+      "P90": 54.88888888888889,
+      "P99": 55.0,
+      "mean": 46.85045027904617,
+      "p_lmp_ge_100": 0.0,
+      "p_lmp_at_cap": 0.0,
+      "share_undefined_islanded": 0.0
+    }
+  ],
+  "rating_sensitivity": [
+    {
+      "corridor": "SOUTH-CAL",
+      "rating_scale": 0.9,
+      "rating_mw": 1440.0,
+      "p_corridor_congested": 0.2616,
+      "ci95_low": 0.24960384673392536,
+      "ci95_high": 0.27396220699567314,
+      "p_any_internal_congested": 0.3022,
+      "expected_congestion_rent_musd_per_year": 262.51468406632875,
+      "expected_production_cost_musd_per_year": 2217.780048149024
+    },
+    {
+      "corridor": "SOUTH-CAL",
+      "rating_scale": 0.95,
+      "rating_mw": 1520.0,
+      "p_corridor_congested": 0.2426,
+      "ci95_low": 0.23091881709910805,
+      "ci95_high": 0.25467641037571853,
+      "p_any_internal_congested": 0.2834,
+      "expected_congestion_rent_musd_per_year": 254.60217969835972,
+      "expected_production_cost_musd_per_year": 2205.129971503395
+    },
+    {
+      "corridor": "SOUTH-CAL",
+      "rating_scale": 1.0,
+      "rating_mw": 1600.0,
+      "p_corridor_congested": 0.2224,
+      "ci95_low": 0.21108856897831188,
+      "ci95_high": 0.2341376747940729,
+      "p_any_internal_congested": 0.2644,
+      "expected_congestion_rent_musd_per_year": 242.29969780218804,
+      "expected_production_cost_musd_per_year": 2193.618013857864
+    },
+    {
+      "corridor": "SOUTH-CAL",
+      "rating_scale": 1.05,
+      "rating_mw": 1680.0,
+      "p_corridor_congested": 0.2014,
+      "ci95_low": 0.1905147148323108,
+      "ci95_high": 0.2127437736058524,
+      "p_any_internal_congested": 0.2438,
+      "expected_congestion_rent_musd_per_year": 229.66111897519815,
+      "expected_production_cost_musd_per_year": 2183.337747828065
+    },
+    {
+      "corridor": "SOUTH-CAL",
+      "rating_scale": 1.1,
+      "rating_mw": 1760.0000000000002,
+      "p_corridor_congested": 0.177,
+      "ci95_low": 0.16666981492501706,
+      "ci95_high": 0.18782613874386003,
+      "p_any_internal_congested": 0.2216,
+      "expected_congestion_rent_musd_per_year": 210.32618816752142,
+      "expected_production_cost_musd_per_year": 2174.258064457238
+    },
+    {
+      "corridor": "EDM-NORTH",
+      "rating_scale": 0.9,
+      "rating_mw": 2970.0,
+      "p_corridor_congested": 0.4924,
+      "ci95_low": 0.47855346223215445,
+      "ci95_high": 0.5062582072659368,
+      "p_any_internal_congested": 0.6392,
+      "expected_congestion_rent_musd_per_year": 328.4902000686021,
+      "expected_production_cost_musd_per_year": 2198.6530555485697
+    },
+    {
+      "corridor": "EDM-NORTH",
+      "rating_scale": 0.95,
+      "rating_mw": 3135.0,
+      "p_corridor_congested": 0.2358,
+      "ci95_low": 0.2242391251309682,
+      "ci95_high": 0.24776654347372948,
+      "p_any_internal_congested": 0.4352,
+      "expected_congestion_rent_musd_per_year": 273.1949552570491,
+      "expected_production_cost_musd_per_year": 2194.844157786763
+    },
+    {
+      "corridor": "EDM-NORTH",
+      "rating_scale": 1.0,
+      "rating_mw": 3300.0,
+      "p_corridor_congested": 0.0412,
+      "ci95_low": 0.03603395813265233,
+      "ci95_high": 0.04707051104159172,
+      "p_any_internal_congested": 0.2644,
+      "expected_congestion_rent_musd_per_year": 242.29969780218804,
+      "expected_production_cost_musd_per_year": 2193.618013857864
+    },
+    {
+      "corridor": "EDM-NORTH",
+      "rating_scale": 1.05,
+      "rating_mw": 3465.0,
+      "p_corridor_congested": 0.0222,
+      "ci95_low": 0.01846806568308761,
+      "ci95_high": 0.02666557723638451,
+      "p_any_internal_congested": 0.2456,
+      "expected_congestion_rent_musd_per_year": 239.78633052804668,
+      "expected_production_cost_musd_per_year": 2193.1204005817312
+    },
+    {
+      "corridor": "EDM-NORTH",
+      "rating_scale": 1.1,
+      "rating_mw": 3630.0000000000005,
+      "p_corridor_congested": 0.0222,
+      "ci95_low": 0.01846806568308761,
+      "ci95_high": 0.02666557723638451,
+      "p_any_internal_congested": 0.2456,
+      "expected_congestion_rent_musd_per_year": 238.50926706804668,
+      "expected_production_cost_musd_per_year": 2192.698327712525
+    }
+  ],
+  "n1": {
+    "hours": 17520,
+    "wall_seconds": 85.06452747000003,
+    "n_lps": 192,
+    "ranking": [
+      {
+        "contingency": "EDM-NORTH-1",
+        "islands": "",
+        "share_hours_overload": 0.9942351598173516,
+        "max_post_loading": 1.9999999999999964,
+        "worst_line": "EDM-NORTH-2",
+        "overload_mwh_per_year": 12679043.832834806,
+        "islanded_injection_mean_mw": 0.0,
+        "islanded_injection_max_mw": 0.0,
+        "delta_cost_musd_per_year": 154.04560943699133,
+        "delta_congestion_rent_musd_per_year": 448.5235508583754,
+        "mean_abs_delta_lmp": 10.336544044324523,
+        "p95_abs_delta_lmp": 30.0,
+        "share_hours_lmp_changed_gt_1usd": 0.9942351598173516,
+        "share_hours_any_binding_post": 0.9992009132420091,
+        "unserved_mwh_per_year": 485.677098166591,
+        "hours_with_shed_per_year": 4.0,
+        "rank_security": 1.0,
+        "rank_economic": 1.0
+      },
+      {
+        "contingency": "EDM-NORTH-2",
+        "islands": "",
+        "share_hours_overload": 0.9942351598173516,
+        "max_post_loading": 1.9999999999999964,
+        "worst_line": "EDM-NORTH-1",
+        "overload_mwh_per_year": 12679043.832834806,
+        "islanded_injection_mean_mw": 0.0,
+        "islanded_injection_max_mw": 0.0,
+        "delta_cost_musd_per_year": 154.04560943699133,
+        "delta_congestion_rent_musd_per_year": 448.5235508583754,
+        "mean_abs_delta_lmp": 10.336544044324523,
+        "p95_abs_delta_lmp": 30.0,
+        "share_hours_lmp_changed_gt_1usd": 0.9942351598173516,
+        "share_hours_any_binding_post": 0.9992009132420091,
+        "unserved_mwh_per_year": 485.677098166591,
+        "hours_with_shed_per_year": 4.0,
+        "rank_security": 1.0,
+        "rank_economic": 1.0
+      },
+      {
+        "contingency": "CAL-RD",
+        "islands": "",
+        "share_hours_overload": 0.6407534246575343,
+        "max_post_loading": 1.4223836408442045,
+        "worst_line": "SOUTH-CAL",
+        "overload_mwh_per_year": 1240654.699499031,
+        "islanded_injection_mean_mw": 0.0,
+        "islanded_injection_max_mw": 0.0,
+        "delta_cost_musd_per_year": 25.112208311188283,
+        "delta_congestion_rent_musd_per_year": 110.73731733618233,
+        "mean_abs_delta_lmp": 3.5086383425047813,
+        "p95_abs_delta_lmp": 17.000000000000004,
+        "share_hours_lmp_changed_gt_1usd": 0.6407534246575343,
+        "share_hours_any_binding_post": 0.6719748858447488,
+        "unserved_mwh_per_year": 0.0,
+        "hours_with_shed_per_year": 0.0,
+        "rank_security": 3.0,
+        "rank_economic": 5.0
+      },
+      {
+        "contingency": "RD-EDM",
+        "islands": "",
+        "share_hours_overload": 0.5463470319634703,
+        "max_post_loading": 1.7527311034637727,
+        "worst_line": "CAL-EDM",
+        "overload_mwh_per_year": 1246559.756384602,
+        "islanded_injection_mean_mw": 0.0,
+        "islanded_injection_max_mw": 0.0,
+        "delta_cost_musd_per_year": 15.344591265455128,
+        "delta_congestion_rent_musd_per_year": 49.00373703703701,
+        "mean_abs_delta_lmp": 3.774518011161848,
+        "p95_abs_delta_lmp": 20.166666666666664,
+        "share_hours_lmp_changed_gt_1usd": 0.5765410958904109,
+        "share_hours_any_binding_post": 0.5918949771689498,
+        "unserved_mwh_per_year": 0.0,
+        "hours_with_shed_per_year": 0.0,
+        "rank_security": 4.0,
+        "rank_economic": 6.0
+      },
+      {
+        "contingency": "SOUTH-CAL",
+        "islands": "",
+        "share_hours_overload": 0.39817351598173517,
+        "max_post_loading": 2.41025744088108,
+        "worst_line": "SOUTH-RD",
+        "overload_mwh_per_year": 3465633.5472292528,
+        "islanded_injection_mean_mw": 0.0,
+        "islanded_injection_max_mw": 0.0,
+        "delta_cost_musd_per_year": 140.48800850642266,
+        "delta_congestion_rent_musd_per_year": -25.856243240740746,
+        "mean_abs_delta_lmp": 3.14159062658549,
+        "p95_abs_delta_lmp": 44.49999999999999,
+        "share_hours_lmp_changed_gt_1usd": 0.39817351598173517,
+        "share_hours_any_binding_post": 0.44332191780821917,
+        "unserved_mwh_per_year": 1600.1295769850542,
+        "hours_with_shed_per_year": 27.5,
+        "rank_security": 5.0,
+        "rank_economic": 3.0
+      },
+      {
+        "contingency": "SOUTH-RD",
+        "islands": "",
+        "share_hours_overload": 0.32197488584474887,
+        "max_post_loading": 1.6570519906057424,
+        "worst_line": "SOUTH-CAL",
+        "overload_mwh_per_year": 1899152.607718275,
+        "islanded_injection_mean_mw": 0.0,
+        "islanded_injection_max_mw": 0.0,
+        "delta_cost_musd_per_year": 72.40813840897637,
+        "delta_congestion_rent_musd_per_year": -27.748040740740763,
+        "mean_abs_delta_lmp": 1.7623471588026387,
+        "p95_abs_delta_lmp": 41.5,
+        "share_hours_lmp_changed_gt_1usd": 0.32197488584474887,
+        "share_hours_any_binding_post": 0.3709474885844749,
+        "unserved_mwh_per_year": 0.0,
+        "hours_with_shed_per_year": 0.0,
+        "rank_security": 6.0,
+        "rank_economic": 4.0
+      },
+      {
+        "contingency": "CAL-EDM",
+        "islands": "",
+        "share_hours_overload": 0.2226027397260274,
+        "max_post_loading": 1.1000440994078433,
+        "worst_line": "SOUTH-CAL",
+        "overload_mwh_per_year": 82692.90398628268,
+        "islanded_injection_mean_mw": 0.0,
+        "islanded_injection_max_mw": 0.0,
+        "delta_cost_musd_per_year": -2.373264181539317,
+        "delta_congestion_rent_musd_per_year": 7.556795370370346,
+        "mean_abs_delta_lmp": 0.7753659309994942,
+        "p95_abs_delta_lmp": 9.500000000000007,
+        "share_hours_lmp_changed_gt_1usd": 0.24178082191780823,
+        "share_hours_any_binding_post": 0.2884703196347032,
+        "unserved_mwh_per_year": 0.0,
+        "hours_with_shed_per_year": 0.0,
+        "rank_security": 7.0,
+        "rank_economic": 8.0
+      },
+      {
+        "contingency": "BC-CAL",
+        "islands": "BC",
+        "share_hours_overload": NaN,
+        "max_post_loading": NaN,
+        "worst_line": "",
+        "overload_mwh_per_year": NaN,
+        "islanded_injection_mean_mw": 49.12135334113097,
+        "islanded_injection_max_mw": 800.0,
+        "delta_cost_musd_per_year": 5.386296419371994,
+        "delta_congestion_rent_musd_per_year": -2.558,
+        "mean_abs_delta_lmp": 0.995148401826484,
+        "p95_abs_delta_lmp": 10.0,
+        "share_hours_lmp_changed_gt_1usd": 0.06929223744292237,
+        "share_hours_any_binding_post": 0.23670091324200912,
+        "unserved_mwh_per_year": 0.0,
+        "hours_with_shed_per_year": 0.0,
+        "rank_security": 8.0,
+        "rank_economic": 7.0
+      }
+    ],
+    "outages_that_lower_cost": {
+      "CAL-RD": {
+        "share_hours_cheaper": 0.001312785388127854,
+        "best_hour": "2025-12-24 12:00:00",
+        "best_saving_per_hour": 845.3428497619461
+      },
+      "RD-EDM": {
+        "share_hours_cheaper": 0.09606164383561644,
+        "best_hour": "2025-12-24 19:00:00",
+        "best_saving_per_hour": 10614.96758074846
+      },
+      "CAL-EDM": {
+        "share_hours_cheaper": 0.18710045662100458,
+        "best_hour": "2025-06-04 18:00:00",
+        "best_saving_per_hour": 4343.604593513475
+      }
+    }
+  },
+  "checks": {
+    "mc_independent_angle_dcopf_resolve": {
+      "scenarios_checked": 100,
+      "with_line_outage": 50,
+      "max_abs_lmp_diff": 2.4158453015843406e-13,
+      "max_abs_flow_diff_mw": 2.3646862246096134e-11,
+      "passed": true
+    },
+    "n1_base_ptdf_reproduces_opf_flows": {
+      "max_error_mw": 4.035882739117369e-12,
+      "passed": true
+    },
+    "congestion_rent_non_negative": {
+      "min_rent_per_hour": -2.2364723326023456e-10,
+      "passed": true
+    },
+    "switching_paradox_CAL-RD": {
+      "line": "CAL-RD",
+      "hour": "2025-12-24 12:00:00",
+      "intact": 231647.4786188905,
+      "without_line": 230802.1357691284,
+      "saving_per_hour": 845.3428497621207,
+      "passed": true
+    },
+    "switching_paradox_RD-EDM": {
+      "line": "RD-EDM",
+      "hour": "2025-12-24 19:00:00",
+      "intact": 255340.41112547746,
+      "without_line": 244725.44354472886,
+      "saving_per_hour": 10614.967580748606,
+      "passed": true
+    },
+    "switching_paradox_CAL-EDM": {
+      "line": "CAL-EDM",
+      "hour": "2025-06-04 18:00:00",
+      "intact": 145799.12710530628,
+      "without_line": 141455.52251179278,
+      "saving_per_hour": 4343.604593513504,
+      "passed": true
+    }
+  },
+  "figures": [
+    "reports/figures/mc_congestion_probability.png",
+    "reports/figures/network_mc_congestion.png",
+    "reports/figures/mc_lmp_intervals.png",
+    "reports/figures/mc_lmp_ecdf.png",
+    "reports/figures/mc_convergence.png",
+    "reports/figures/n1_security.png",
+    "reports/figures/n1_dlmp_heatmap.png",
+    "reports/figures/rating_sensitivity.png"
+  ]
+}

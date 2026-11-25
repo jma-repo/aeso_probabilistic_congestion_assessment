@@ -6,6 +6,8 @@
 
 Phase 1: synthetic inputs -> hourly DC-OPF (with and without line limits)
          -> sanity checks -> figures -> reports/phase1_summary.{json,md}
+Phase 2: Monte Carlo (uncertainty + forced outages), rating sensitivity,
+         N-1 contingency screen + re-dispatch -> reports/phase2_summary.{json,md}
 """
 from __future__ import annotations
 
@@ -15,12 +17,12 @@ import time
 
 import pandas as pd
 
-from . import checks, plots
+from . import checks, contingency, montecarlo, plots
 from .config import data_dir, load_config, reports_dir
 from .simulate import DispatchResult, solve_dispatch, summarize
 from .synth import generate_inputs
 
-IMPLEMENTED_PHASES = (1,)
+IMPLEMENTED_PHASES = (1, 2)
 
 
 def save_result(res: DispatchResult, folder, prefix: str = "") -> None:
@@ -131,6 +133,215 @@ def phase1_markdown(cfg: dict, s: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _phase1_outputs(cfg: dict):
+    d = data_dir(cfg) / "phase1"
+    if not (d / "lmp.parquet").exists():
+        phase1(cfg)
+    return pd.read_parquet(d / "inputs.parquet"), load_result(d)
+
+
+def _fmt_table(df: pd.DataFrame, pct_cols=(), money_cols=(), float_cols=(), index_name: str = "") -> str:
+    cols = list(df.columns)
+    out = [f"| {index_name} | " + " | ".join(cols) + " |", "|---|" + "---:|" * len(cols)]
+    for idx, r in df.iterrows():
+        cells = []
+        for c in cols:
+            v = r[c]
+            if isinstance(v, str):
+                cells.append(v)
+            elif pd.isna(v):
+                cells.append("—")
+            elif c in pct_cols:
+                cells.append(f"{v:.1%}")
+            elif c in money_cols:
+                cells.append(f"{v:,.1f}")
+            elif c.startswith("rank_") or float(v).is_integer() and abs(v) >= 1:
+                cells.append(f"{v:,.0f}")
+            else:
+                cells.append(f"{v:,.2f}" if c in float_cols or abs(v) < 100 else f"{v:,.0f}")
+        out.append(f"| {idx} | " + " | ".join(cells) + " |")
+    return "\n".join(out)
+
+
+def phase2(cfg: dict) -> dict:
+    base_inputs, base = _phase1_outputs(cfg)
+    out_data = data_dir(cfg) / "phase2"
+    out_data.mkdir(parents=True, exist_ok=True)
+    out_rep = reports_dir(cfg)
+    fig_dir, tab_dir = out_rep / "figures", out_rep / "tables"
+    tab_dir.mkdir(parents=True, exist_ok=True)
+
+    # ---------------- Monte Carlo ----------------
+    n = cfg["montecarlo"]["n_scenarios"]
+    print(f"[phase 2] Monte Carlo: {n:,} scenarios on {cfg['montecarlo']['workers']} workers")
+    scen, res = montecarlo.run_monte_carlo(cfg, base_inputs)
+    m = res.meta
+    print(f"   {m['n_lps']} LPs over {m['n_topologies']} topologies, wall {m['total_seconds']:.1f}s "
+          f"(sum of LP times {m['sum_lp_seconds']:.1f}s)")
+    scen.inputs.to_parquet(out_data / "mc_inputs.parquet")
+    scen.line_out.to_parquet(out_data / "mc_line_out.parquet")
+    scen.gen_avail.to_parquet(out_data / "mc_gen_avail.parquet")
+    save_result(res, out_data, prefix="mc_")
+
+    det_share = base.binding.mean()
+    line_tab = montecarlo.line_congestion_table(cfg, scen, res, det_share)
+    q_mc, q_det = montecarlo.lmp_quantiles(res), montecarlo.lmp_quantiles(base)
+    any_bind = montecarlo.any_binding_stats(res)
+    adequacy = montecarlo.adequacy_stats(cfg, res)
+    econ_mc = montecarlo.economic_stats(cfg, res)
+    econ_det = montecarlo.economic_stats(cfg, base)
+    top_lines = list(line_tab.index[:4])
+    conv = montecarlo.convergence(res, top_lines)
+    line_tab.to_csv(tab_dir / "mc_line_congestion.csv")
+    q_mc.to_csv(tab_dir / "mc_lmp_quantiles.csv")
+
+    print("[phase 2] rating sensitivity (common random numbers)")
+    sens = montecarlo.rating_sensitivity(cfg, scen, res) if cfg["montecarlo"]["rating_sensitivity"]["enabled"] else None
+    if sens is not None:
+        sens.to_csv(tab_dir / "rating_sensitivity.csv", index=False)
+
+    # ---------------- N-1 ----------------
+    stride = cfg["contingency"]["hours_stride"]
+    n1_inputs = base_inputs.iloc[::stride]
+    n1_base = DispatchResult(*(getattr(base, k).iloc[::stride] for k in ("lmp", "flow", "loading", "binding", "dispatch")))
+    print(f"[phase 2] N-1: {len(cfg['lines'])} line outages x {len(n1_inputs):,} hours")
+    t0 = time.perf_counter()
+    screen, screen_meta = contingency.security_screen(cfg, n1_inputs, n1_base)
+    econ, dlmp, econ_meta = contingency.economic_impact(cfg, n1_inputs, n1_base)
+    ranked = contingency.rank(screen, econ)
+    n1_wall = time.perf_counter() - t0
+    ranked.to_csv(tab_dir / "n1_ranking.csv")
+    dlmp.to_csv(tab_dir / "n1_mean_delta_lmp.csv")
+
+    print("[phase 2] checks")
+    chk = {
+        "mc_independent_angle_dcopf_resolve": checks.check_mc_resolve(cfg, scen, res, n=100, seed=cfg["seed"]),
+        "n1_base_ptdf_reproduces_opf_flows": {"max_error_mw": screen_meta["base_ptdf_flow_error_mw"],
+                                              "passed": screen_meta["base_ptdf_flow_error_mw"] < 1e-6},
+        "congestion_rent_non_negative": {"min_rent_per_hour": econ_mc["min_congestion_rent_per_hour"],
+                                         "passed": econ_mc["min_congestion_rent_per_hour"] > -1e-3},
+    }
+    cheaper = {l: v for l, v in econ_meta["cheaper_hours"].items() if v["share_hours_cheaper"] > 0}
+    for l, v in cheaper.items():
+        chk[f"switching_paradox_{l}"] = checks.check_switching_paradox(cfg, n1_inputs, l, v["best_hour"])
+    for k, v in chk.items():
+        print(f"   {'PASS' if v['passed'] else 'FAIL'}  {k}")
+
+    print("[phase 2] figures")
+    figs = [
+        plots.mc_congestion_probability(line_tab, fig_dir),
+        plots.network_diagram(cfg, fig_dir, line_tab["p_congested"], "Monte Carlo P(line at limit)", name="network_mc_congestion"),
+        plots.mc_lmp_intervals(q_det, q_mc, fig_dir),
+        plots.mc_lmp_ecdf(res, fig_dir),
+        plots.mc_convergence(conv, fig_dir),
+        plots.n1_security(ranked, fig_dir),
+        plots.n1_dlmp_heatmap(dlmp, fig_dir),
+    ]
+    if sens is not None:
+        figs.append(plots.rating_sensitivity_plot(sens, fig_dir))
+
+    summary = {
+        "monte_carlo": {
+            "n_scenarios": n, "n_lps": m["n_lps"], "n_topologies": m["n_topologies"],
+            "wall_seconds": m["total_seconds"], "sum_lp_seconds": m["sum_lp_seconds"],
+            "ms_per_scenario_wall": 1000 * m["total_seconds"] / n,
+            "workers": cfg["montecarlo"]["workers"],
+            "share_scenarios_with_line_outage": float(scen.line_out.any(axis=1).mean()),
+            "mean_unavailable_generation_mw": float(((1 - scen.gen_avail) * pd.Series(
+                {g: v["p_nom"] for g, v in cfg["generators"].items()})).sum(axis=1).mean()),
+            "any_binding": any_bind, "adequacy": adequacy, "economics": econ_mc,
+            "deterministic_economics": econ_det,
+        },
+        "line_congestion": line_tab.reset_index(names="line").to_dict(orient="records"),
+        "lmp_quantiles_mc": q_mc.reset_index(names="bus").to_dict(orient="records"),
+        "lmp_quantiles_deterministic": q_det.reset_index(names="bus").to_dict(orient="records"),
+        "rating_sensitivity": sens.to_dict(orient="records") if sens is not None else None,
+        "n1": {"hours": len(n1_inputs), "wall_seconds": n1_wall, "n_lps": econ_meta["n_lps"],
+               "ranking": ranked.reset_index().to_dict(orient="records"),
+               "outages_that_lower_cost": {l: {**v, "best_hour": str(v["best_hour"])} for l, v in cheaper.items()}},
+        "checks": chk,
+        "figures": [str(p.relative_to(out_rep.parent)) for p in figs],
+    }
+    with open(out_rep / "phase2_summary.json", "w") as f:
+        json.dump(summary, f, indent=2, default=str)
+    (out_rep / "phase2_summary.md").write_text(phase2_markdown(summary, line_tab, q_det, q_mc, sens, ranked, dlmp))
+    print(f"[phase 2] done -> {out_rep / 'phase2_summary.md'}")
+    return summary
+
+
+def phase2_markdown(s, line_tab, q_det, q_mc, sens, ranked, dlmp) -> str:
+    mc = s["monte_carlo"]
+    ab = mc["any_binding"]
+    ad, ec, ed = mc["adequacy"], mc["economics"], mc["deterministic_economics"]
+    L = [
+        "# Phase 2 summary (auto-generated by `python -m src.run`)",
+        "",
+        "## Monte Carlo",
+        "",
+        f"* **{mc['n_scenarios']:,} scenarios** solved as {mc['n_lps']} LPs over {mc['n_topologies']} distinct topologies "
+        f"on {mc['workers']} workers: **{mc['wall_seconds']:.1f} s wall** ({mc['ms_per_scenario_wall']:.2f} ms/scenario; "
+        f"sum of LP times {mc['sum_lp_seconds']:.1f} s)",
+        f"* Scenarios with ≥1 line out: {mc['share_scenarios_with_line_outage']:.1%}; mean generation on forced outage: "
+        f"{mc['mean_unavailable_generation_mw']:,.0f} MW",
+        f"* P(≥1 internal line at limit) = **{ab['internal_lines']['p']:.1%}** "
+        f"[{ab['internal_lines']['ci95'][0]:.1%}, {ab['internal_lines']['ci95'][1]:.1%}] "
+        f"→ {ab['internal_lines']['expected_hours_per_year']:,.0f} h/yr; including the BC intertie "
+        f"{ab['all_lines_incl_intertie']['p']:.1%} → {ab['all_lines_incl_intertie']['expected_hours_per_year']:,.0f} h/yr",
+        f"* Adequacy: LOLP {ad['lolp']:.3%} [{ad['lolp_ci95'][0]:.3%}, {ad['lolp_ci95'][1]:.3%}] → LOLE "
+        f"{ad['lole_hours_per_year']:.1f} h/yr; EUE {ad['eue_mwh_per_year']:,.0f} MWh/yr "
+        f"[{max(0, ad['eue_ci95'][0]):,.0f}, {ad['eue_ci95'][1]:,.0f}]",
+        f"* Expected production cost {ec['expected_production_cost_musd_per_year']:,.0f} M$/yr "
+        f"(deterministic {ed['expected_production_cost_musd_per_year']:,.0f}); expected congestion rent "
+        f"{ec['expected_congestion_rent_musd_per_year']:,.0f} M$/yr (deterministic {ed['expected_congestion_rent_musd_per_year']:,.0f})",
+        "",
+        "### Per-line congestion probability (95% Wilson CI)",
+        "",
+        _fmt_table(line_tab, pct_cols=("deterministic_share", "p_congested", "ci95_low", "ci95_high",
+                                       "p_congested_all_lines_in", "p_congested_any_line_out", "p_out_of_service"),
+                   index_name="line"),
+        "",
+        "### LMP distribution by bus ($/MWh)",
+        "",
+        "Monte Carlo:",
+        "",
+        _fmt_table(q_mc, pct_cols=("p_lmp_ge_100", "p_lmp_at_cap", "share_undefined_islanded"), float_cols=("P10", "P50", "P90", "P99", "mean"), index_name="bus"),
+        "",
+        "Deterministic (2-year hourly, no outages):",
+        "",
+        _fmt_table(q_det[["P10", "P50", "P90", "P99", "mean", "p_lmp_ge_100"]], pct_cols=("p_lmp_ge_100",), float_cols=("P10", "P50", "P90", "P99", "mean"), index_name="bus"),
+        "",
+    ]
+    if sens is not None:
+        L += ["### Rating sensitivity (same scenarios at every rating)", "",
+              _fmt_table(sens.set_index("corridor"), pct_cols=("rating_scale", "p_corridor_congested", "ci95_low", "ci95_high", "p_any_internal_congested"),
+                         money_cols=("expected_congestion_rent_musd_per_year", "expected_production_cost_musd_per_year"), index_name="corridor"), ""]
+    n1 = s["n1"]
+    cols = ["islands", "share_hours_overload", "max_post_loading", "worst_line", "overload_mwh_per_year",
+            "islanded_injection_max_mw", "delta_cost_musd_per_year", "mean_abs_delta_lmp", "share_hours_lmp_changed_gt_1usd",
+            "unserved_mwh_per_year", "rank_security", "rank_economic"]
+    L += ["## N-1 contingency analysis", "",
+          f"* {len(ranked)} single-line outages × {n1['hours']:,} hours; re-dispatch solved as {n1['n_lps']} LPs; "
+          f"total N-1 wall time {n1['wall_seconds']:.1f} s",
+          "* Security screen = flows with the *pre-contingency* dispatch on the reduced network (PTDF). "
+          "Economic view = full DC-OPF re-dispatch without the line.", "",
+          "### Ranked critical lines", "",
+          _fmt_table(ranked[cols], pct_cols=("share_hours_overload", "max_post_loading", "share_hours_lmp_changed_gt_1usd"),
+                     money_cols=("delta_cost_musd_per_year",), float_cols=("mean_abs_delta_lmp",), index_name="outaged line"),
+          "", "### Mean LMP change after re-dispatch ($/MWh)", "",
+          _fmt_table(dlmp, float_cols=tuple(dlmp.columns), index_name="outaged line"), ""]
+    if n1["outages_that_lower_cost"]:
+        L += ["### Outages that *lower* production cost in some hours (transmission-switching / Braess effect)", ""]
+        for l, v in n1["outages_that_lower_cost"].items():
+            L.append(f"* {l}: cheaper in {v['share_hours_cheaper']:.1%} of hours; best hour {v['best_hour']} saves "
+                     f"${v['best_saving_per_hour']:,.0f}/h")
+        L.append("")
+    L += ["## Checks", "", "| check | result | details |", "|---|---|---|"]
+    for k, v in s["checks"].items():
+        det = ", ".join(f"{dk}={dv:.3g}" if isinstance(dv, float) else f"{dk}={dv}" for dk, dv in v.items() if dk != "passed")
+        L.append(f"| {k} | {'PASS' if v['passed'] else 'FAIL'} | {det} |")
+    return "\n".join(L) + "\n"
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default=None)
@@ -143,6 +354,8 @@ def main(argv=None):
             raise SystemExit(f"phase {p} not implemented yet (implemented: {IMPLEMENTED_PHASES})")
     if 1 in phases:
         phase1(cfg)
+    if 2 in phases:
+        phase2(cfg)
 
 
 if __name__ == "__main__":
