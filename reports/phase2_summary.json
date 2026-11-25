@@ -3,9 +3,9 @@
     "n_scenarios": 20000,
     "n_lps": 51,
     "n_topologies": 33,
-    "wall_seconds": 24.494801426999402,
-    "sum_lp_seconds": 82.30221113999869,
-    "ms_per_scenario_wall": 1.22474007134997,
+    "wall_seconds": 22.441232022999998,
+    "sum_lp_seconds": 75.89869461700039,
+    "ms_per_scenario_wall": 1.1220616011499998,
     "workers": 4,
     "share_scenarios_with_line_outage": 0.08225,
     "mean_unavailable_generation_mw": 738.9125,
@@ -391,7 +391,7 @@
   ],
   "n1": {
     "hours": 17520,
-    "wall_seconds": 92.9390093510001,
+    "wall_seconds": 79.58051708699998,
     "n_lps": 192,
     "ranking": [
       {

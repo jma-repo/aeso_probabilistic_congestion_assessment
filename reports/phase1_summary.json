@@ -35,7 +35,7 @@
     },
     "mean_total_load_mw": 9798.600486805153,
     "peak_total_load_mw": 12825.941744465368,
-    "solve_seconds": 42.902954958996816
+    "solve_seconds": 38.976727609000136
   },
   "copper_plate": {
     "hours": 17520,
@@ -73,9 +73,9 @@
     },
     "mean_total_load_mw": 9798.600486805153,
     "peak_total_load_mw": 12825.941744465368,
-    "solve_seconds": 43.00772438099921
+    "solve_seconds": 39.209669731999725
   },
-  "wall_seconds_constrained_run": 42.9149949800003,
+  "wall_seconds_constrained_run": 38.98899063900001,
   "checks": {
     "copper_plate_single_price": {
       "max_price_spread_without_limits": 1.4210854715202004e-14,

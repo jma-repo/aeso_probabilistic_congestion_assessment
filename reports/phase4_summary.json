@@ -1,0 +1,28 @@
+{
+  "run_id": 1,
+  "url": "sqlite:///data/aeso_poc.sqlite",
+  "rows": {
+    "hourly.scenario": 17520,
+    "hourly.scenario_bus_input": 87600,
+    "hourly.bus_result": 105120,
+    "hourly.line_result": 140160,
+    "hourly.gen_dispatch": 227760,
+    "mc_test.scenario": 20000,
+    "mc_test.scenario_bus_input": 100000,
+    "mc_test.scenario_line_outage": 1708,
+    "mc_test.scenario_gen_availability": 50590,
+    "mc_test.bus_result": 120000,
+    "mc_test.line_result": 160000,
+    "mc_test.gen_dispatch": 260000,
+    "mc_test.surrogate_lmp": 360000,
+    "mc_test.surrogate_congestion": 160000,
+    "line_congestion_stat": 24,
+    "lmp_quantile": 102,
+    "n1_result": 8,
+    "n1_delta_lmp": 40,
+    "surrogate_metric": 252,
+    "runtime": 6
+  },
+  "seconds": 17.74119321599983,
+  "total_rows": 1810890
+}

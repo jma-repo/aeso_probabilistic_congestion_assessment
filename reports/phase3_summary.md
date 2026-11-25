@@ -2,8 +2,8 @@
 
 ## Monte Carlo task (main result)
 
-* Training data: 17,000 + 3,000 validation MC scenarios from a separate seed (26.7 s of OPF). Test: the 20,000 Phase 2 study scenarios, never seen in training. 39 features.
-* Fit times (s): baseline (copper plate) 0.0, LightGBM 9.4, MLP 13.7, classifier 2.2
+* Training data: 17,000 + 3,000 validation MC scenarios from a separate seed (22.3 s of OPF). Test: the 20,000 Phase 2 study scenarios, never seen in training. 39 features.
+* Fit times (s): baseline (copper plate) 0.0, LightGBM 9.0, MLP 21.4, classifier 2.1
 
 ### Accuracy on the test scenarios (mean over buses, $/MWh)
 
@@ -88,27 +88,27 @@ LMP quantiles ($/MWh):
 
 |  | seconds | speed-up vs OPF 4 workers | ms_per_scenario |
 |---|---|---|---|
-| DC-OPF, 4 workers (Phase 2 wall) | 24.5 | 1× | 1.2247 |
-| DC-OPF, 1 core (sum of LP times) | 82.3 | 0× | 4.1151 |
-| LightGBM + classifier, 4 threads | 1.94 | 13× | 0.0969 |
-| LightGBM + classifier, 1 thread | 6.26 | 4× | 0.3131 |
-| MLP + classifier, 4 threads | 0.356 | 69× | 0.0178 |
-| baseline (merit order) | 0.0412 | 594× | 0.0021 |
+| DC-OPF, 4 workers (Phase 2 wall) | 22.4 | 1× | 1.1221 |
+| DC-OPF, 1 core (sum of LP times) | 75.9 | 0× | 3.7949 |
+| LightGBM + classifier, 4 threads | 1.79 | 13× | 0.0894 |
+| LightGBM + classifier, 1 thread | 5.98 | 4× | 0.2990 |
+| MLP + classifier, 4 threads | 0.349 | 64× | 0.0174 |
+| baseline (merit order) | 0.0412 | 545× | 0.0021 |
 
-* Up-front cost of the surrogate: 27 s of training OPFs + 12 s fitting (LightGBM + classifier). Break-even vs re-running the OPF Monte Carlo: **≈33,888 scenarios**.
+* Up-front cost of the surrogate: 22 s of training OPFs + 11 s fitting (LightGBM + classifier). Break-even vs re-running the OPF Monte Carlo: **≈32,302 scenarios**.
 
 ### Ablation: target and loss (MC test set, $/MWh)
 
 |  | MAE | RMSE | MAE_congested | MAE_uncongested | P99_abs_error | fit_seconds |
 |---|---|---|---|---|---|---|
-| ('LightGBM', 'raw LMP', 'L2') | 1.61 | 16.09 | 3.45 | 0.70 | 21.52 | 10.3 |
-| ('MLP', 'raw LMP', 'L2') | 2.26 | 11.54 | 4.10 | 1.35 | 17.84 | 10.6 |
-| ('LightGBM', 'raw LMP', 'Huber') | 1.06 | 15.78 | 2.25 | 0.47 | 12.63 | 30.8 |
-| ('MLP', 'raw LMP', 'Huber') | 1.48 | 9.40 | 2.86 | 0.79 | 14.54 | 12.3 |
-| ('LightGBM', 'hybrid (LMP − merit price)', 'L2') | 1.94 | 11.41 | 4.07 | 0.89 | 18.39 | 2.2 |
-| ('MLP', 'hybrid (LMP − merit price)', 'L2') | 1.89 | 14.26 | 4.37 | 0.66 | 17.31 | 13.3 |
-| ('LightGBM', 'hybrid (LMP − merit price)', 'Huber') | 0.84 | 11.02 | 2.08 | 0.22 | 11.18 | 9.2 |
-| ('MLP', 'hybrid (LMP − merit price)', 'Huber') | 1.19 | 9.67 | 2.73 | 0.42 | 13.33 | 12.8 |
+| ('LightGBM', 'raw LMP', 'L2') | 1.61 | 16.09 | 3.45 | 0.70 | 21.52 | 8.9 |
+| ('MLP', 'raw LMP', 'L2') | 2.26 | 11.54 | 4.10 | 1.35 | 17.84 | 8.5 |
+| ('LightGBM', 'raw LMP', 'Huber') | 1.06 | 15.78 | 2.25 | 0.47 | 12.63 | 28.0 |
+| ('MLP', 'raw LMP', 'Huber') | 1.48 | 9.40 | 2.86 | 0.79 | 14.54 | 11.4 |
+| ('LightGBM', 'hybrid (LMP − merit price)', 'L2') | 1.94 | 11.41 | 4.07 | 0.89 | 18.39 | 2.1 |
+| ('MLP', 'hybrid (LMP − merit price)', 'L2') | 1.89 | 14.26 | 4.37 | 0.66 | 17.31 | 12.2 |
+| ('LightGBM', 'hybrid (LMP − merit price)', 'Huber') | 0.84 | 11.02 | 2.08 | 0.22 | 11.18 | 8.2 |
+| ('MLP', 'hybrid (LMP − merit price)', 'Huber') | 1.19 | 9.67 | 2.73 | 0.42 | 13.33 | 10.8 |
 
 ### Learning curve (LightGBM hybrid + classifier)
 

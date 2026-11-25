@@ -272,7 +272,7 @@ Scenarios are drawn i.i.d., so every probability carries a **95% Wilson interval
 topologies**, solved as 51 LPs on 4 worker processes.
 
 **Solve time for the full Monte Carlo study: ≈21–26 s wall-clock** (≈1.1–1.3 ms per scenario on 4 cores; the
-range is run-to-run variation, including process start-up). The sum of the individual LP times is 82–88 s, about
+range is run-to-run variation, including process start-up). The sum of the individual LP times is 76–88 s, about
 4 ms per scenario on a single core. This is the benchmark the Phase 3
 surrogates have to beat.
 
@@ -503,14 +503,14 @@ Both choices are backed by a full ablation in `reports/phase3_summary.md`:
 
 ![LMP ECDF: OPF vs surrogates](reports/figures/surrogate_lmp_ecdf.png)
 
-| Runtime for the 20,000-scenario study (range over two full runs) | Seconds | Speed-up |
+| Runtime for the 20,000-scenario study (range over three full runs) | Seconds | Speed-up |
 |---|---:|---:|
-| DC-OPF, 4 worker processes (Phase 2) | 24.5–25.9 | 1× |
-| DC-OPF, 1 core (sum of LP times) | 82–88 | — |
-| LightGBM + classifier, 4 threads | 1.9–2.2 | **12–13×** |
-| LightGBM + classifier, 1 thread | 6.3 | ≈13–14× vs 1-core OPF |
-| MLP + classifier, 4 threads | 0.36–0.37 | **≈70×** |
-| Merit-order baseline | 0.04 | ≈600× |
+| DC-OPF, 4 worker processes (Phase 2) | 22–26 | 1× |
+| DC-OPF, 1 core (sum of LP times) | 76–88 | — |
+| LightGBM + classifier, 4 threads | 1.8–2.2 | **12–13×** |
+| LightGBM + classifier, 1 thread | 6.0–6.3 | ≈13–14× vs 1-core OPF |
+| MLP + classifier, 4 threads | 0.35–0.37 | **≈65–70×** |
+| Merit-order baseline | 0.04 | ≈550–630× |
 
 ![runtime](reports/figures/surrogate_runtime.png)
 
