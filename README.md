@@ -10,7 +10,7 @@ LMP data to learn from. This project therefore:
 4. stores everything in **SQL** and shows it in a **Streamlit** dashboard *(Phase 4)*,
 5. calibrates load and wind/solar shapes against **real AESO data** *(Phase 5)*.
 
-> **Status:** Phases 1–2 complete. Phases 3–5 are planned (see [Roadmap](#roadmap)).
+> **Status:** Phases 1–3 complete. Phases 4–5 are planned (see [Roadmap](#roadmap)).
 
 > ⚠️ **This is a DC approximation.** DC-OPF assumes lossless lines, flat voltage magnitudes and small angle
 > differences, and ignores reactive power and voltage limits entirely. All capacities, costs and line ratings are
@@ -88,14 +88,15 @@ python -m src.run
 pytest -q
 ```
 
-`python -m src.run` runs every implemented phase (currently Phases 1–2, ≈5 min on 4 cores). Use
+`python -m src.run` runs every implemented phase (currently Phases 1–3, ≈11 min on 4 cores). Use
 `python -m src.run --phases 2` to run a single phase; Phase 2 reuses Phase 1 outputs, or creates them if they
-are missing. `pytest -q` runs 15 correctness tests in about 35 s.
+are missing. `pytest -q` runs 21 correctness tests in about 70 s.
 
 * Outputs go to `data/` as parquet files; this folder is git-ignored and can be regenerated.
 * Figures and summaries go to `reports/` and are committed.
-* The walkthroughs are `notebooks/01_phase1_walkthrough.ipynb` and `notebooks/02_phase2_probabilistic.ipynb`.
-* Phase 2 tables are also written as CSV files to `reports/tables/`.
+* The walkthroughs are `notebooks/01_phase1_walkthrough.ipynb`, `notebooks/02_phase2_probabilistic.ipynb` and
+  `notebooks/03_phase3_surrogates.ipynb`.
+* Phase 2 and Phase 3 tables are also written as CSV files to `reports/tables/`.
 
 ### Repository layout
 
@@ -107,6 +108,10 @@ src/grid.py          PyPSA network builder; PTDF matrix
 src/simulate.py      block-wise DC-OPF; solve_many(): group by topology, solve in parallel
 src/montecarlo.py    scenario sampling (uncertainty + forced outages), Wilson CIs, sensitivities
 src/contingency.py   N-1: PTDF security screen + re-dispatch economic impact, ranking
+src/features.py      feature matrix, merit-order (copper-plate) price, leakage-free splits
+src/models.py        baseline, LightGBM per bus, PyTorch MLP, congestion classifier, hybrid wrapper
+src/evaluate.py      metrics by bus/regime, MC comparison, worst cases, 1-D step sweeps
+src/surrogate_study.py  Phase 3 pipeline
 src/checks.py        sanity checks incl. an independent angle-based DC-OPF
 src/plots.py         figures
 src/run.py           one-command pipeline
@@ -377,20 +382,205 @@ How to read this:
 
 ---
 
+## Phase 3 — ML surrogates
+
+Full auto-generated output: [`reports/phase3_summary.md`](reports/phase3_summary.md) (CSV files in `reports/tables/`).
+
+### Set-up
+
+* **Inputs (39 features).** All of them are known *before* solving the OPF:
+  * load per bus and total load, and system temperature;
+  * wind, solar and hydro availability, both as capacity factors and in MW;
+  * net load, available thermal capacity and reserve margin;
+  * South and North surplus (local available generation minus local load);
+  * the copper-plate merit-order price (computed analytically; see below);
+  * hour, day of week and month;
+  * one 0/1 outage indicator per line, and the available fraction of every generator.
+* **Targets.** LMP at all six buses, and a binding flag for each of the eight lines.
+* **Models.**
+
+  | # | Model | What it is |
+  |---|---|---|
+  | 1 | **Baseline** | A single system price that ignores the network: the merit-order (copper-plate) price, computed analytically. It equals the copper-plate LP on all 17,520 hours, and matches it to 1e-6 \$/MWh in a test with outages. |
+  | 2 | **LightGBM** | One model per bus, with exact TreeSHAP values computed inside LightGBM (`pred_contrib`). |
+  | 3 | **PyTorch MLP** | One multi-output network for all buses: 256-256-128 ReLU, Adam, early stopping on validation loss. Undefined LMPs (islanded BC) are masked out of the loss. |
+  | 4 | **Congestion classifier** | LightGBM, one binary model per line. Lines with fewer than 5 binding hours in training fall back to the base rate. |
+
+* **Splits. Nothing is shuffled across time, and the test set is never used for fitting or early stopping.**
+  * **MC task (main result).** Train on a *separate* set of 20,000 Monte Carlo scenarios with its own seed. The last
+    15% of that set (3,000 scenarios) is used for validation and early stopping. Test on the 20,000 Phase 2 study
+    scenarios.
+  * **Hourly task.** Train on 2025, validate on 2026 H1, test on 2026 H2, with a 7-day embargo at each boundary
+    because weather is autocorrelated. This data has no outages.
+
+### Two design choices that mattered more than the model family
+
+Both choices are backed by a full ablation in `reports/phase3_summary.md`:
+
+| MC test MAE (\$/MWh, mean over buses) | LightGBM | MLP |
+|---|---:|---:|
+| raw LMP target, L2 loss (the textbook set-up) | 1.61 | 2.26 |
+| raw LMP target, Huber loss | 1.06 | 1.48 |
+| **hybrid target (LMP − merit price), Huber loss** | **0.84** | **1.19** |
+
+1. **Physics-informed "hybrid" target.**
+   * When no line is at its limit, LMP equals the copper-plate merit-order price exactly, and that price costs
+     microseconds to compute. So the models receive it as an input and learn only the **congestion component**
+     (LMP − merit price).
+   * Every merit-order step (gas unit *n* becomes marginal) is then exact by construction. The ML only has to learn
+     the network steps.
+2. **Robust (Huber) loss.**
+   * About 0.05% of scenarios hit the \$999.99 price cap. Under an L2 loss these few points dominate training: in
+     the first experiment with L2 and a raw target, the MLP's best validation epoch was epoch 13.
+   * With Huber loss (5 \$/MWh transition for LightGBM; 1 σ on standardised targets for the MLP), both models fit
+     the bulk of the distribution much better.
+
+### Accuracy (MC test set: 20,000 scenarios the models never saw)
+
+| Model | MAE | RMSE | MAE, congested rows | MAE, uncongested rows | P99 \|error\| |
+|---|---:|---:|---:|---:|---:|
+| Baseline (copper plate) | 3.50 | 13.9 | 10.42 | **0.07** | 23.7 |
+| **LightGBM (hybrid, Huber)** | **0.84** | 11.0 | **2.08** | 0.22 | **11.2** |
+| MLP (hybrid, Huber) | 1.19 | **9.7** | 2.73 | 0.42 | 13.3 |
+
+* **The naive baseline is perfect without congestion and badly wrong with it.** Its MAE is \$0.07 in uncongested
+  rows and \$10.42 in congested ones. In other words, all of the surrogate's value is in the 33% of hours with a
+  binding line.
+* **LightGBM wins on MAE and in every regime except the North corridor and line outages, where the two models are
+  close.** The MLP has a lower RMSE, but only because it extrapolates more aggressively on the few \$999.99
+  scarcity points (it predicts about \$150 where LightGBM predicts about \$90). Both models are still wrong there
+  by more than \$800.
+* **The hourly task is easier.** There are no outages and no scarcity events: LightGBM MAE is \$0.19, the MLP's is
+  \$0.27, and the baseline's is \$2.66.
+* **Congestion classifier.**
+  * For the lines that matter, F1 is 0.97–0.99 and ROC-AUC 1.00: SOUTH–CAL, BC–CAL and both EDM–NORTH circuits.
+  * For rare lines, recall drops: 0.75 on SOUTH–RD (117 positives) and 0.61 on CAL–EDM (59 positives).
+
+![error by regime](reports/figures/surrogate_mae_by_regime.png)
+
+### Main result: rerunning the Phase 2 Monte Carlo with the surrogate
+
+![MC congestion: OPF vs surrogate](reports/figures/surrogate_mc_congestion.png)
+
+| Line | OPF P(at limit) [95% CI] | Surrogate (mean predicted prob.) | Error |
+|---|---:|---:|---:|
+| SOUTH–CAL | 22.31% [21.74, 22.89] | 22.31% | 0.00 pp |
+| BC–CAL | 7.04% [6.69, 7.40] | 7.00% | 0.04 pp |
+| EDM–NORTH-1 / -2 | 3.16% / 3.03% | 3.14% / 3.04% | ≤0.03 pp |
+| SOUTH–RD | 0.58% [0.49, 0.70] | 0.53% | 0.06 pp |
+| CAL–EDM | 0.29% [0.23, 0.38] | 0.28% | 0.01 pp |
+| P(≥1 internal line) | 26.67% [26.07, 27.29] | 26.59% | 0.08 pp |
+
+* **Congestion probabilities are reproduced to within 0.08 percentage points**, well inside the OPF's own Monte
+  Carlo sampling interval for every line with non-trivial congestion. The congestion-hours-per-year numbers match to
+  within 5 h/yr.
+* **Mean LMPs match within \$0.45/MWh** at every bus. P10 and P90 are within about \$0.6 (LightGBM) and \$0.9 (MLP).
+* **One quantile is visibly off: the P50 at CAL and BC** (OPF \$48.78; LightGBM \$46.5, MLP \$46.0). The OPF price
+  distribution has *atoms*: 50% of scenarios sit at or below \$45, and the next plateau is a loop-flow mixture price
+  of \$48.78. The median falls exactly on that jump, so a tiny shift in the predicted distribution moves the
+  quantile by \$2–4.
+  * Quantiles of step-shaped distributions are fragile. For decisions, report exceedance probabilities such as
+    P(LMP ≥ x), or means.
+  * The ECDF below shows the predicted distributions tracking every plateau of the OPF distribution, with the MLP
+    smoothing the corners.
+
+![LMP ECDF: OPF vs surrogates](reports/figures/surrogate_lmp_ecdf.png)
+
+| Runtime for the 20,000-scenario study | Seconds | Speed-up |
+|---|---:|---:|
+| DC-OPF, 4 worker processes (Phase 2) | 25.9 | 1× |
+| DC-OPF, 1 core (sum of LP times) | 88.1 | — |
+| LightGBM + classifier, 4 threads | 2.2 | **12×** |
+| LightGBM + classifier, 1 thread | 6.3 | 14× vs 1-core OPF |
+| MLP + classifier, 4 threads | 0.37 | **71×** |
+| Merit-order baseline | 0.04 | 630× |
+
+![runtime](reports/figures/surrogate_runtime.png)
+
+**The speed-up only pays off for repeated studies.**
+
+* The surrogate's up-front cost is 26 s of OPF to generate the training data plus 13 s of fitting. For a *single*
+  20,000-scenario study, that is more than running the OPF Monte Carlo directly.
+* **Break-even is about 33,000 scenarios.** Beyond that, every additional study comes almost free: sensitivity
+  sweeps, 10⁶-scenario runs for rare events, and real-time what-if screening.
+* The learning curve shows how much training data is needed. With 5,000 training OPFs, congestion probabilities
+  are already within 0.3 pp and MAE is \$1.11. With 17,000, they are within 0.06 pp and MAE is \$0.84.
+
+![learning curve](reports/figures/surrogate_learning_curve.png)
+
+### LMP is a step function: where each model fails
+
+LMP is piecewise constant in its inputs. It jumps when the marginal unit changes (a merit-order step) and when a
+line reaches its limit (a network step). The plots below take one test-period hour, vary a single input, and
+re-solve the OPF at 101 points.
+
+![wind sweep](reports/figures/surrogate_step_wind.png)
+![load sweep](reports/figures/surrogate_step_load.png)
+
+* **Merit-order steps** (wind CF ≈ 9% and 56%, and the load steps): both surrogates are almost exact, because the
+  hybrid target hands them these steps through the merit-price feature. The exception is that LightGBM drifts up
+  to about \$3 above the true price just before the 120% load step at CAL.
+* **Network steps** (South wind above about 80%, when SOUTH–CAL binds):
+  * The OPF drops from \$42 to \$0.5 at SOUTH in two sharp steps.
+  * **LightGBM** produces steps too, because trees are piecewise-constant, but the threshold is learned from data.
+    It starts the drop about 3 percentage points of CF early and the curve is jagged. At CAL it wobbles about
+    \$1–1.5 below the true \$50.
+  * **The MLP smooths the jump into a ramp** spread over about 10 percentage points of CF. It also slightly
+    *undershoots* the \$0.5 wind floor, predicting about −\$1.5, which a physical market cannot clear at here.
+* **Out of the training distribution** (load scaled to 80–95% on an evening hour, a combination that is rare in
+  training): the MLP extrapolates linearly and predicts \$33–40 at NORTH, where the true price is \$40. LightGBM
+  stays flat at the nearest training values. Trees cannot extrapolate, but here that is a virtue.
+* **Scarcity** (\$999.99 prices, about 0.05% of scenarios; every one of the largest errors is one of these): both
+  models predict \$50–280. With 10–20 examples in training, combinations of multiple outages that lead to load
+  shedding are not learnable. A production surrogate should fall back to the OPF when the classifier or the reserve
+  margin flags a stressed system.
+
+### What drives the congestion premium? (TreeSHAP)
+
+![SHAP](reports/figures/surrogate_shap_importance.png)
+
+* **South surplus** (available wind + solar − South load) dominates the SOUTH congestion component, with a mean
+  \|SHAP\| of \$8.9/MWh. Raw wind CF and renewable MW add about \$2 each. This matches the physics: SOUTH–CAL binds
+  when the South has more than it can export.
+* For **CAL**, the same South surplus is the top driver (\$2.5), followed by the merit price and the reserve margin.
+* The SHAP dependence plot below shows the step directly.
+  * The SHAP value falls from about +\$7 to about −\$18 between 2,000 and 2,500 MW of surplus, which is roughly the
+    South's combined export capability.
+  * With a southern line out (orange), the drop starts at about 1,200 MW, and at low surplus the premium is higher
+    (about +\$10), because the South then depends on a single import path.
+
+![SHAP dependence](reports/figures/surrogate_shap_dependence.png)
+
+### Limitations of the surrogates (honest scope)
+
+* **In-distribution only.** The test scenarios come from the same sampling process as the training scenarios. This
+  shows the surrogate can replace the OPF *inside a given study design*, not that it generalises.
+* **No network what-ifs without retraining.** Line ratings and topology are not inputs, so the surrogate cannot
+  answer Phase 2's rating sensitivity: it would predict 22.2% congestion for every SOUTH–CAL rating, while the
+  OPF moves from 26% to 18%. Topology-aware models such as GNNs, or ratings as features, are the next step.
+* **Scarcity tails are not reproduced.** This makes the surrogate unsuitable for adequacy metrics such as
+  LOLE/EUE: keep the OPF, or use a hybrid OPF fallback, for those.
+* **The surrogates learn this simulator.** Their accuracy is measured against a DC-OPF on synthetic data, not
+  against a real market.
+
+---
+
 ## Roadmap
 
 | Phase | Content | Status |
 |---|---|---|
 | 1 | Synthetic grid, hourly DC-OPF/LMP simulator, sanity checks | ✅ done |
 | 2 | Monte Carlo (load, wind, line and generator outages); N-1 ranking; solve-time budget | ✅ done |
-| 3 | Surrogates: copper-plate baseline, per-bus LightGBM + SHAP, multi-output MLP, line-congestion classifier; surrogate MC versus full OPF | planned |
+| 3 | Surrogates: copper-plate baseline, per-bus LightGBM + SHAP, multi-output MLP, line-congestion classifier; surrogate MC versus full OPF | ✅ done |
 | 4 | SQLAlchemy store (SQLite by default; Postgres/SQL Server through the connection string); Streamlit dashboard | planned |
 | 5 | AESO API: real AIL load shape, wind/solar shapes, calibration against pool price (needs `AESO_API_KEY`) | after key is confirmed |
 
 ### Next steps beyond this POC
 
 * AC power flow and AC-OPF, to add losses, voltage and reactive power.
-* Graph neural networks that use the network topology, so surrogates can generalise across outages.
+* Graph neural networks that use the network topology (or ratings and topology as features), so surrogates can
+  generalise across outages and network what-ifs.
+* Surrogates with an OPF fallback: call the OPF when the classifier or the reserve margin flags a stressed system.
 * Calibrating costs from AESO merit-order data.
 * Forced outage rates from AIES generation capacity data.
 * Intertie limits taken from AESO intertie reports.

@@ -331,3 +331,173 @@ def rating_sensitivity_plot(sens: pd.DataFrame, out: Path) -> Path:
     ax.set_title("Rating sensitivity (same scenarios for every rating)", loc="left", pad=26)
     ax.legend(loc="lower left", bbox_to_anchor=(0, 1.0), ncol=2)
     return _save(fig, out, "rating_sensitivity")
+
+
+# ---------------------------------------------------------------------------
+# Phase 3
+# ---------------------------------------------------------------------------
+MODEL_COLOR = {"OPF": TEXT, "baseline": "#9c9c9c", "LightGBM": SERIES[0], "MLP": SERIES[1]}
+
+
+def _mcolor(name: str) -> str:
+    for k, c in MODEL_COLOR.items():
+        if name.startswith(k):
+            return c
+    return SERIES[2]
+
+
+def p3_regime_mae(reg: pd.DataFrame, out: Path, name: str = "surrogate_mae_by_regime", title: str = "") -> Path:
+    style()
+    models = [c for c in reg.columns if c != "share_of_rows"]
+    t = reg.iloc[::-1]
+    y = np.arange(len(t))
+    h = 0.8 / len(models)
+    fig, ax = plt.subplots(figsize=(8.2, 0.55 * len(t) + 1.6))
+    for k, m in enumerate(models):
+        ax.barh(y + (len(models) / 2 - k - 0.5) * h, t[m], height=h * 0.92, color=_mcolor(m), label=m)
+    ax.set_yticks(y, [f"{r}  ({s:.1%})" for r, s in zip(t.index, t["share_of_rows"])])
+    ax.set_xlabel("Mean absolute LMP error, averaged over buses ($/MWh)")
+    ax.set_title(title or "Where the surrogates fail: error by operating regime (test set)", loc="left", pad=26)
+    ax.legend(loc="lower left", bbox_to_anchor=(0, 1.0), ncol=len(models), fontsize=8.5)
+    ax.grid(axis="y", visible=False)
+    return _save(fig, out, name)
+
+
+def p3_mc_congestion(cmp: pd.DataFrame, out: Path) -> Path:
+    style()
+    t = cmp.sort_values("opf_p")
+    y = np.arange(len(t))
+    h = 0.36
+    fig, ax = plt.subplots(figsize=(7.8, 4.2))
+    err = np.vstack([t["opf_p"] - t["opf_ci95_low"], t["opf_ci95_high"] - t["opf_p"]])
+    ax.barh(y + h / 2, t["opf_p"], height=h, color=TEXT, label="full DC-OPF (95% CI)", xerr=err,
+            error_kw=dict(ecolor="#9c9c9c", lw=1, capsize=2))
+    ax.barh(y - h / 2, t["surrogate_p_mean_prob"], height=h, color=SERIES[0], label="LightGBM classifier (mean prob.)")
+    for i, (a, b) in enumerate(zip(t["opf_p"], t["surrogate_p_mean_prob"])):
+        ax.text(max(a, b) + 0.008, i, f"{a:.2%} vs {b:.2%}", va="center", fontsize=8, color=TEXT)
+    ax.set_yticks(y, t.index)
+    ax.set_xlim(0, t["opf_p"].max() * 1.35)
+    ax.xaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0))
+    ax.set_xlabel("P(line at limit) over the 20,000 Phase 2 scenarios")
+    ax.set_title("Monte Carlo congestion probability: OPF vs surrogate", loc="left", pad=26)
+    ax.legend(loc="lower left", bbox_to_anchor=(0, 1.0), ncol=2, fontsize=8.5)
+    ax.grid(axis="y", visible=False)
+    return _save(fig, out, "surrogate_mc_congestion")
+
+
+def p3_ecdf_compare(Y: pd.DataFrame, preds: dict, out: Path, buses=("SOUTH", "CAL"), xlim=(-5, 90)) -> Path:
+    style()
+    fig, axes = plt.subplots(1, len(buses), figsize=(10, 4.2))
+    for ax, b in zip(np.atleast_1d(axes), buses):
+        col = f"lmp_{b}"
+        series = {"OPF": Y[col], **{k: v[col] for k, v in preds.items()}}
+        for name, s in series.items():
+            v = np.sort(s.dropna().to_numpy())
+            ax.step(v, np.arange(1, len(v) + 1) / len(v), where="post", color=_mcolor(name), label=name,
+                    lw=2.2 if name == "OPF" else 1.5, ls="--" if name.startswith("baseline") else "-")
+        ax.set_xlim(*xlim)
+        ax.set_title(b, loc="left")
+        ax.set_xlabel("LMP ($/MWh)")
+        ax.yaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0))
+    np.atleast_1d(axes)[0].set_ylabel("Share of scenarios ≤ x")
+    np.atleast_1d(axes)[0].legend(loc="upper left", fontsize=8)
+    fig.suptitle("LMP distribution over the Monte Carlo test set: OPF vs surrogates", x=0.01, ha="left", fontweight="bold")
+    fig.tight_layout()
+    return _save(fig, out, "surrogate_lmp_ecdf")
+
+
+def p3_step_sweep(sw: pd.DataFrame, models: list[str], buses: list[str], xlabel: str, out: Path, name: str,
+                  title: str, pct: bool = False) -> Path:
+    style()
+    fig, axes = plt.subplots(1, len(buses), figsize=(10, 4.2))
+    for ax, b in zip(np.atleast_1d(axes), buses):
+        x = sw["value"]
+        bind = sw["any_binding"].to_numpy()
+        for i in range(len(x) - 1):
+            if bind[i]:
+                ax.axvspan(x.iloc[i], x.iloc[i + 1], color="#efefef", lw=0, zorder=0)
+        ax.step(x, sw[f"OPF_{b}"], where="mid", color=TEXT, lw=2.4, label="DC-OPF (truth)")
+        for m in models:
+            ax.plot(x, sw[f"{m}_{b}"], color=_mcolor(m), lw=1.6, ls="--" if m.startswith("baseline") else "-", label=m)
+        ax.set_title(b, loc="left")
+        ax.set_xlabel(xlabel)
+        if pct:
+            ax.xaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0))
+    np.atleast_1d(axes)[0].set_ylabel("LMP ($/MWh)")
+    np.atleast_1d(axes)[0].legend(loc="best", fontsize=8)
+    fig.suptitle(title + "  (grey = a line is at its limit)", x=0.01, ha="left", fontweight="bold")
+    fig.tight_layout()
+    return _save(fig, out, name)
+
+
+def p3_shap(shap_abs: dict[str, pd.Series], out: Path, top: int = 10) -> Path:
+    style()
+    fig, axes = plt.subplots(1, len(shap_abs), figsize=(10.5, 4.4))
+    for ax, (bus, s) in zip(np.atleast_1d(axes), shap_abs.items()):
+        t = s.sort_values(ascending=False).head(top).iloc[::-1]
+        ax.barh(t.index, t.values, color=SERIES[0], height=0.6)
+        ax.set_title(f"{bus}: congestion component of LMP", loc="left", fontsize=10)
+        ax.set_xlabel("mean |SHAP| ($/MWh)")
+        ax.grid(axis="y", visible=False)
+        ax.tick_params(axis="y", labelsize=8)
+    fig.suptitle("What drives the congestion premium? TreeSHAP, LightGBM hybrid models (test set)", x=0.01, ha="left", fontweight="bold")
+    fig.tight_layout()
+    return _save(fig, out, "surrogate_shap_importance")
+
+
+def p3_shap_dependence(x: pd.Series, sv: pd.Series, color: pd.Series, out: Path, xlabel: str, clabel: str) -> Path:
+    style()
+    fig, ax = plt.subplots(figsize=(7.6, 4.3))
+    c = color.astype(bool).to_numpy()
+    ax.scatter(x[~c], sv[~c], s=6, color=SEQ[2], alpha=0.5, linewidths=0, label=f"{clabel} = 0")
+    ax.scatter(x[c], sv[c], s=10, color=SERIES[1], alpha=0.8, linewidths=0, label=f"{clabel} = 1")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("SHAP value for LMP_SOUTH ($/MWh)")
+    ax.set_title("SHAP dependence: South surplus vs its effect on the SOUTH price", loc="left", pad=26)
+    ax.legend(loc="lower left", bbox_to_anchor=(0, 1.0), ncol=2, markerscale=3, fontsize=8.5)
+    return _save(fig, out, "surrogate_shap_dependence")
+
+
+def p3_learning_curve(lc: pd.DataFrame, out: Path) -> Path:
+    style()
+    fig, ax = plt.subplots(figsize=(7.4, 4.2))
+    for k, (m, col) in enumerate((("MAE all rows", "MAE"), ("MAE congested rows", "MAE_congested"))):
+        ax.plot(lc["n_train"], lc[col], color=SERIES[k], marker="o", ms=6, label=m)
+    ax.set_xscale("log")
+    ax.set_xlabel("Training scenarios (OPF solves), log scale")
+    ax.set_ylabel("Test MAE, mean over buses ($/MWh)")
+    ax.set_title("Learning curve: LightGBM hybrid", loc="left", pad=26)
+    ax.legend(loc="lower left", bbox_to_anchor=(0, 1.0), ncol=2)
+    return _save(fig, out, "surrogate_learning_curve")
+
+
+def p3_runtime(rt: pd.DataFrame, out: Path) -> Path:
+    style()
+    t = rt.iloc[::-1]
+    fig, ax = plt.subplots(figsize=(8, 0.5 * len(t) + 1.4))
+    ax.barh(t.index, t["seconds"], color=[TEXT if i.startswith("DC-OPF") else SERIES[0] for i in t.index], height=0.6)
+    for i, v in enumerate(t["seconds"]):
+        ax.text(v * 1.15, i, f"{v:.3g} s", va="center", fontsize=8, color=TEXT)
+    ax.set_xscale("log")
+    ax.set_xlim(t["seconds"].min() / 2, t["seconds"].max() * 8)
+    ax.set_xlabel("Seconds for the 20,000-scenario Monte Carlo study (log scale)")
+    ax.set_title("Runtime: full OPF vs surrogate", loc="left")
+    ax.grid(axis="y", visible=False)
+    return _save(fig, out, "surrogate_runtime")
+
+
+def p3_pred_vs_true(Y: pd.DataFrame, preds: dict, bus: str, out: Path) -> Path:
+    style()
+    fig, axes = plt.subplots(1, len(preds), figsize=(10, 4.2), sharex=True, sharey=True)
+    col = f"lmp_{bus}"
+    for ax, (name, P) in zip(np.atleast_1d(axes), preds.items()):
+        ax.scatter(Y[col], P[col], s=5, alpha=0.35, color=_mcolor(name), linewidths=0)
+        ax.plot([0, 130], [0, 130], color=TEXT2, lw=1, ls="--")
+        ax.set_xlim(-5, 130)
+        ax.set_ylim(-5, 130)
+        ax.set_title(name, loc="left", fontsize=10)
+        ax.set_xlabel(f"OPF LMP {bus} ($/MWh)")
+    np.atleast_1d(axes)[0].set_ylabel("Predicted ($/MWh)")
+    fig.suptitle(f"Predicted vs true LMP at {bus} (test scenarios; axes clipped at $130)", x=0.01, ha="left", fontweight="bold")
+    fig.tight_layout()
+    return _save(fig, out, f"surrogate_pred_vs_true_{bus}")

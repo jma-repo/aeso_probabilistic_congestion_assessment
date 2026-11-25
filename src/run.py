@@ -8,6 +8,8 @@ Phase 1: synthetic inputs -> hourly DC-OPF (with and without line limits)
          -> sanity checks -> figures -> reports/phase1_summary.{json,md}
 Phase 2: Monte Carlo (uncertainty + forced outages), rating sensitivity,
          N-1 contingency screen + re-dispatch -> reports/phase2_summary.{json,md}
+Phase 3: ML surrogates (baseline, LightGBM, MLP, congestion classifier),
+         surrogate Monte Carlo vs full OPF -> reports/phase3_summary.{json,md}
 """
 from __future__ import annotations
 
@@ -22,7 +24,7 @@ from .config import data_dir, load_config, reports_dir
 from .simulate import DispatchResult, solve_dispatch, summarize
 from .synth import generate_inputs
 
-IMPLEMENTED_PHASES = (1, 2)
+IMPLEMENTED_PHASES = (1, 2, 3)
 
 
 def save_result(res: DispatchResult, folder, prefix: str = "") -> None:
@@ -356,6 +358,9 @@ def main(argv=None):
         phase1(cfg)
     if 2 in phases:
         phase2(cfg)
+    if 3 in phases:
+        from .surrogate_study import phase3
+        phase3(cfg, phase2_runner=phase2)
 
 
 if __name__ == "__main__":

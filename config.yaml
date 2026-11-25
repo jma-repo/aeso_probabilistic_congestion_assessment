@@ -181,3 +181,43 @@ montecarlo:
 contingency:
   workers: 4
   hours_stride: 1           # 1 = every hour of the 2-year synthetic data
+
+# =============================================================================
+# Phase 3: ML surrogates
+# =============================================================================
+surrogate:
+  train_seed_offset: 2000     # MC training set (Phase 2 test set uses seed_offset 1000)
+  n_train_scenarios: 20000    # OPF solves spent on training data (incl. 15 % validation)
+  val_share: 0.15
+  embargo_days: 7             # gap between hourly train/val/test periods
+  learning_curve_sizes: [1000, 2000, 5000, 10000, 17000]
+  # hybrid = physics-informed residual: models predict LMP - merit-order (copper-plate)
+  # price, and get that price as a feature. Exact when no line binds.
+  hybrid: true
+  ablation: true              # also fit raw/hybrid x L2/Huber variants for the report
+  lgbm:
+    objective: huber          # robust to the rare $999.99 scarcity prices
+    alpha: 5.0                # Huber transition point, $/MWh
+    learning_rate: 0.05
+    num_leaves: 63
+    min_data_in_leaf: 20
+    feature_fraction: 0.9
+    bagging_fraction: 0.9
+    bagging_freq: 1
+    seed: 0
+  lgbm_classifier:
+    learning_rate: 0.05
+    num_leaves: 31
+    min_data_in_leaf: 20
+    seed: 0
+  mlp:
+    hidden: [256, 256, 128]
+    lr: 0.001
+    weight_decay: 1.0e-5
+    batch_size: 512
+    max_epochs: 400
+    patience: 40
+    loss: huber               # Huber on standardised targets
+    huber_delta: 1.0
+  classifier_threshold: 0.5
+  step_sweep_points: 101      # OPF solves per 1-D sweep in the failure analysis
