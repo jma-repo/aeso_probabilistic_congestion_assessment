@@ -1,0 +1,118 @@
+{
+  "constrained": {
+    "hours": 17520,
+    "share_hours_any_binding": 0.27037671232876714,
+    "share_hours_binding_by_line": {
+      "SOUTH-CAL": 0.2214041095890411,
+      "SOUTH-RD": 0.0,
+      "CAL-RD": 0.0,
+      "RD-EDM": 0.0,
+      "CAL-EDM": 0.0,
+      "EDM-NORTH-1": 0.015296803652968037,
+      "EDM-NORTH-2": 0.015296803652968037,
+      "BC-CAL": 0.03367579908675799
+    },
+    "mean_lmp_by_bus": {
+      "NORTH": 45.260673515981736,
+      "EDM": 45.312100456621,
+      "RD": 44.360419837645864,
+      "CAL": 47.21546169457128,
+      "SOUTH": 36.74697488584475,
+      "BC": 46.85045027904617
+    },
+    "mean_abs_spread_internal_buses": 10.51991374936581,
+    "p95_spread_internal_buses": 49.5,
+    "hours_with_load_shed": 0,
+    "energy_share_by_carrier": {
+      "ccgt": 0.326696314769425,
+      "cogen": 0.4075859926329561,
+      "gas_steam": 0.0014602164651416317,
+      "hydro": 0.0490830508017033,
+      "import": 0.0050130989019582985,
+      "peaker": 1.448405714977766e-05,
+      "solar": 0.01801141292734977,
+      "wind": 0.19213542944431625
+    },
+    "mean_total_load_mw": 9798.600486805153,
+    "peak_total_load_mw": 12825.941744465368,
+    "solve_seconds": 48.838814528000285
+  },
+  "copper_plate": {
+    "hours": 17520,
+    "share_hours_any_binding": 0.0,
+    "share_hours_binding_by_line": {
+      "SOUTH-CAL": 0.0,
+      "SOUTH-RD": 0.0,
+      "CAL-RD": 0.0,
+      "RD-EDM": 0.0,
+      "CAL-EDM": 0.0,
+      "EDM-NORTH-1": 0.0,
+      "EDM-NORTH-2": 0.0,
+      "BC-CAL": 0.0
+    },
+    "mean_lmp_by_bus": {
+      "NORTH": 44.51187214611872,
+      "EDM": 44.51187214611872,
+      "RD": 44.51187214611872,
+      "CAL": 44.51187214611872,
+      "SOUTH": 44.51187214611872,
+      "BC": 44.51187214611872
+    },
+    "mean_abs_spread_internal_buses": 5.456213867322207e-15,
+    "p95_spread_internal_buses": 1.4210854715202004e-14,
+    "hours_with_load_shed": 0,
+    "energy_share_by_carrier": {
+      "ccgt": 0.3170920918455741,
+      "cogen": 0.4052854800405219,
+      "gas_steam": 0.0008931571494294678,
+      "hydro": 0.0490830508017033,
+      "import": 0.005590491386545275,
+      "peaker": 4.150888274964342e-06,
+      "solar": 0.01801141292734977,
+      "wind": 0.20404016496060123
+    },
+    "mean_total_load_mw": 9798.600486805153,
+    "peak_total_load_mw": 12825.941744465368,
+    "solve_seconds": 44.725112091000256
+  },
+  "wall_seconds_constrained_run": 48.851683853000054,
+  "checks": {
+    "copper_plate_single_price": {
+      "max_price_spread_without_limits": 1.4210854715202004e-14,
+      "passed": true
+    },
+    "independent_angle_dcopf_resolve": {
+      "hours_checked": 200,
+      "congested_hours_checked": 100,
+      "max_abs_lmp_diff": 2.3447910280083306e-13,
+      "max_abs_flow_diff_mw": 2.3874235921539366e-11,
+      "hours_lmp_mismatch_gt_1e-3": [],
+      "share_hours_lmp_match": 1.0,
+      "passed": true
+    },
+    "physics": {
+      "max_power_balance_error_mw": 3.637978807091713e-12,
+      "max_kcl_error_mw": 1.3642420526593924e-12,
+      "max_overload_mw": 0.0,
+      "min_price_separation_on_binding_lines": 0.0,
+      "passed": true
+    },
+    "congestion_target": {
+      "share_hours_any_binding": 0.27037671232876714,
+      "target": [
+        0.1,
+        0.3
+      ],
+      "passed": true
+    }
+  },
+  "figures": [
+    "reports/figures/network.png",
+    "reports/figures/network_congestion.png",
+    "reports/figures/inputs_overview.png",
+    "reports/figures/spread_vs_loading.png",
+    "reports/figures/lmp_week.png",
+    "reports/figures/price_duration.png",
+    "reports/figures/binding_by_line.png"
+  ]
+}

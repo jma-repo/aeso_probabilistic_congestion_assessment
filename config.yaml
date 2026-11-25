@@ -1,0 +1,134 @@
+# =============================================================================
+# Probabilistic congestion assessment POC — single source of truth for parameters
+#
+# ALL capacities, costs, line limits and process parameters below are
+# ILLUSTRATIVE. They are loosely inspired by the shape of the Alberta system
+# (wind in the south, cogeneration in the north, load in Calgary/Edmonton,
+# an intertie to BC) but are NOT calibrated to AESO data. Phase 5 calibrates
+# load/wind shapes against real AESO data.
+# =============================================================================
+
+seed: 42
+
+paths:
+  data_dir: data            # generated data (parquet); git-ignored
+  reports_dir: reports      # figures + summaries; committed
+
+time:
+  start: "2025-01-01 00:00"
+  hours: 17520              # 2 years of hourly data (synthetic calendar, no DST)
+  solve_chunk_hours: 744    # snapshots per LP (hours are independent -> exact)
+
+solver:
+  name: highs
+  options:
+    output_flag: false
+    threads: 1
+
+# Price cap / value of lost load. Alberta's pool price cap is $999.99/MWh;
+# we use it as the cost of an unserved-energy "generator" at every bus so
+# that every outage combination stays feasible and prices stay bounded.
+voll: 999.99
+
+# -----------------------------------------------------------------------------
+# Network: 6 buses, 8 AC circuits (DC power flow). x is in ohms at 240 kV and is
+# roughly proportional to line length; only the RATIOS matter in DC-OPF.
+# s_nom = thermal/operating limit in MW (illustrative).
+# -----------------------------------------------------------------------------
+buses:
+  # x/y = schematic map coordinates (plotting only), load_share of system load,
+  # temp_offset vs system temperature (C), label_pos = where the plot puts the label
+  NORTH: {x: 1.0, y: 4.3, label_pos: right, load_share: 0.22, temp_offset: -3.0, label: "North / Fort McMurray"}
+  EDM:   {x: 0.0, y: 3.0, label_pos: left, load_share: 0.30, temp_offset: -1.0, label: "Edmonton"}
+  RD:    {x: 1.1, y: 1.9, label_pos: right, load_share: 0.08, temp_offset: -0.5, label: "Red Deer (central)"}
+  CAL:   {x: -0.4, y: 1.0, label_pos: below_left, load_share: 0.30, temp_offset: 0.0, label: "Calgary"}
+  SOUTH: {x: 0.9, y: -0.6, label_pos: right, load_share: 0.10, temp_offset: 1.5, label: "South (wind/solar)"}
+  BC:    {x: -2.1, y: 1.0, label_pos: above, load_share: 0.00, temp_offset: 0.0, label: "BC intertie"}
+
+lines:
+  SOUTH-CAL: {bus0: SOUTH, bus1: CAL,   x: 20.0, s_nom: 1600}
+  SOUTH-RD:  {bus0: SOUTH, bus1: RD,    x: 30.0, s_nom: 1100}
+  CAL-RD:    {bus0: CAL,   bus1: RD,    x: 15.0, s_nom: 2400}
+  RD-EDM:    {bus0: RD,    bus1: EDM,   x: 15.0, s_nom: 2400}
+  CAL-EDM:   {bus0: CAL,   bus1: EDM,   x: 30.0, s_nom: 1500}
+  # North is connected by a double-circuit corridor so that an N-1 outage of
+  # one circuit does not island the North (and loads the parallel circuit).
+  EDM-NORTH-1: {bus0: EDM, bus1: NORTH, x: 50.0, s_nom: 1650}
+  EDM-NORTH-2: {bus0: EDM, bus1: NORTH, x: 50.0, s_nom: 1650}
+  BC-CAL:    {bus0: BC,    bus1: CAL,   x: 25.0, s_nom: 800}
+
+# -----------------------------------------------------------------------------
+# Generators. marginal_cost in $/MWh, p_nom in MW. profile = which availability
+# time series scales p_max_pu (none = always 1.0). Wind/solar get a small
+# positive cost to avoid degenerate (non-unique) duals.
+# -----------------------------------------------------------------------------
+generators:
+  SOUTH_wind:   {bus: SOUTH, carrier: wind,    p_nom: 4200, marginal_cost: 0.5,  profile: wind_south}
+  SOUTH_solar:  {bus: SOUTH, carrier: solar,   p_nom: 1500, marginal_cost: 0.3,  profile: solar_south}
+  RD_wind:      {bus: RD,    carrier: wind,    p_nom: 900,  marginal_cost: 0.6,  profile: wind_central}
+  CAL_hydro:    {bus: CAL,   carrier: hydro,   p_nom: 900,  marginal_cost: 8.0,  profile: hydro}
+  NORTH_cogen:  {bus: NORTH, carrier: cogen,   p_nom: 4000, marginal_cost: 25.0, profile: none}
+  NORTH_ccgt:   {bus: NORTH, carrier: ccgt,    p_nom: 1200, marginal_cost: 40.0, profile: none}
+  RD_ccgt:      {bus: RD,    carrier: ccgt,    p_nom: 1500, marginal_cost: 42.0, profile: none}
+  EDM_ccgt:     {bus: EDM,   carrier: ccgt,    p_nom: 2000, marginal_cost: 45.0, profile: none}
+  CAL_ccgt:     {bus: CAL,   carrier: ccgt,    p_nom: 800,  marginal_cost: 50.0, profile: none}
+  # BC can offer more than the intertie can carry, so the intertie itself can bind
+  BC_import:    {bus: BC,    carrier: import,  p_nom: 1000, marginal_cost: 55.0, profile: none}
+  EDM_steam:    {bus: EDM,   carrier: gas_steam, p_nom: 1500, marginal_cost: 65.0, profile: none}
+  RD_peaker:    {bus: RD,    carrier: peaker,  p_nom: 500,  marginal_cost: 120.0, profile: none}
+  CAL_peaker:   {bus: CAL,   carrier: peaker,  p_nom: 1000, marginal_cost: 150.0, profile: none}
+
+# -----------------------------------------------------------------------------
+# Synthetic weather / load / renewable processes
+# -----------------------------------------------------------------------------
+temperature:              # system reference temperature (Celsius), bus offsets above
+  annual_mean: 4.0
+  annual_amplitude: 14.0  # mean of coldest day ~ -10 C, warmest ~ +18 C
+  coldest_day_of_year: 15
+  daily_amplitude: 5.0
+  warmest_hour: 15
+  ar_phi: 0.985           # hourly AR(1) persistence of weather anomaly
+  ar_sigma: 0.75          # innovation std -> stationary std ~ 4.3 C
+  bus_noise_sigma: 0.5    # small independent bus-level noise
+
+load:
+  mean_total_mw: 8900     # base load before temperature uplift -> realised mean ~9.8 GW, peak ~12.7 GW
+  heating_base_C: 15.0
+  heating_coef: 0.011     # +1.1 % load per degree below heating base
+  cooling_base_C: 20.0
+  cooling_coef: 0.015     # +1.5 % per degree above cooling base
+  weekend_factor: 0.94
+  # relative hourly shape (index 0 = hour 00:00-01:00), normalised internally
+  hourly_shape: [0.90, 0.88, 0.87, 0.87, 0.88, 0.92, 0.98, 1.03, 1.05, 1.05, 1.04, 1.04,
+                 1.03, 1.03, 1.03, 1.04, 1.07, 1.10, 1.10, 1.08, 1.05, 1.01, 0.96, 0.92]
+  # North is dominated by industrial (oil sands) load: flatter and less weather-driven
+  industrial_buses: [NORTH]
+  industrial_shape_weight: 0.25     # fraction of the hourly/weekly/temperature variation kept
+  noise_sigma: 0.015                # multiplicative iid noise
+
+wind:
+  # capacity factor = sigmoid(mu(t) + z(t)), z ~ AR(1) per site, sites correlated
+  mean_logit: -0.75       # gives mean CF ~ 0.33-0.36
+  seasonal_amplitude: 0.35   # windier in winter
+  windiest_day_of_year: 15
+  ar_phi: 0.97
+  ar_sigma: 0.32
+  site_correlation: 0.7   # wind_south vs wind_central
+
+solar:
+  latitude_deg: 50.0
+  peak_cf: 0.82
+  cloud_ar_phi: 0.95
+  cloud_ar_sigma: 0.25
+  cloud_mean: 0.25        # mean fractional output reduction from cloud
+
+hydro:
+  # monthly availability (p_max_pu) — run-of-river-ish, freshet in Jun/Jul
+  monthly_pmax_pu: [0.35, 0.35, 0.35, 0.40, 0.65, 0.95, 0.90, 0.70, 0.55, 0.45, 0.40, 0.35]
+
+# -----------------------------------------------------------------------------
+# Phase 1 target: share of hours with at least one binding line.
+# Line ratings above were hand-tuned (see README) to land inside this band.
+# -----------------------------------------------------------------------------
+congestion_target: {min_share: 0.10, max_share: 0.30}
+binding_tolerance: 1.0e-4   # line is "binding" if |flow| >= s_nom * (1 - tol)

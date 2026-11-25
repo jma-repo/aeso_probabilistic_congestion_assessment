@@ -1,0 +1,15 @@
+# Phase 1
+pypsa>=1.0,<2.0
+highspy>=1.7
+linopy>=0.4
+pandas>=2.2
+numpy>=1.26
+scipy>=1.11
+pyyaml>=6.0
+pyarrow>=15
+matplotlib>=3.8
+pytest>=8
+# notebook execution
+nbformat>=5.9
+nbclient>=0.10
+ipykernel>=6.29

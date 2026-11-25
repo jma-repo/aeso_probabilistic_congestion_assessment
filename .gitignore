@@ -1,0 +1,12 @@
+# generated data (regenerate with `python -m src.run`)
+data/
+# secrets (Phase 5: AESO_API_KEY)
+.env
+.env.*
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+*.egg-info/
+.venv/
