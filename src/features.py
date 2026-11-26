@@ -77,13 +77,22 @@ def targets(res) -> tuple[pd.DataFrame, pd.DataFrame]:
 def merit_order_price(cfg: dict, inputs: pd.DataFrame, gen_avail: pd.DataFrame | None = None) -> pd.Series:
     """Naive baseline: system price with NO network (copper plate), computed
     analytically from the merit order: the cost of the cheapest unit that is
-    still needed after stacking all cheaper available capacity."""
+    still needed after stacking all cheaper available capacity.
+
+    Optional must-run (``p_min_pu`` per generator) is dispatched first; the
+    rest of the load is served from the flexible remainder in cost order.
+    Equals the copper-plate DC-OPF price (tested)."""
     avail = _available_mw(cfg, inputs, gen_avail)
     order = sorted(cfg["generators"], key=lambda g: cfg["generators"][g]["marginal_cost"])
     cost = np.array([cfg["generators"][g]["marginal_cost"] for g in order])
-    cum = avail[order].to_numpy().cumsum(axis=1)
-    load = inputs[[f"load_{b}" for b in load_buses(cfg)]].sum(axis=1).to_numpy()[:, None]
-    covered = cum >= load - 1e-6
+    pnom = np.array([cfg["generators"][g]["p_nom"] for g in order])
+    pmin = np.array([cfg["generators"][g].get("p_min_pu", 0.0) for g in order])
+    av = avail[order].to_numpy()
+    must = np.minimum(pmin * pnom, av)
+    cum = (av - must).cumsum(axis=1)
+    load = inputs[[f"load_{b}" for b in load_buses(cfg)]].sum(axis=1).to_numpy()
+    residual = (load - must.sum(axis=1))[:, None]
+    covered = cum >= residual - 1e-6
     idx = covered.argmax(axis=1)
     price = cost[idx]
     price[~covered.any(axis=1)] = cfg["voll"]

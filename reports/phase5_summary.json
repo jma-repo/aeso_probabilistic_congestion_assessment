@@ -1,0 +1,181 @@
+{
+  "period": [
+    "2024-01-01",
+    "2025-12-31"
+  ],
+  "snapshot": "2026-11-26",
+  "api_calls_this_run": 0,
+  "pull_seconds": 1.3585727810000208,
+  "coverage": {
+    "pool_price": {
+      "expected_hours": 17544,
+      "present_hours": 17544,
+      "missing_hours": 0,
+      "first_missing": [],
+      "duplicate_rows": 0
+    },
+    "ail": {
+      "expected_hours": 17544,
+      "present_hours": 17544,
+      "missing_hours": 0,
+      "first_missing": [],
+      "duplicate_rows": 0
+    },
+    "pool_price_nan": 0,
+    "ail_nan": 0,
+    "asset_list_rows": 3757,
+    "csd_snapshot_utc": "2026-11-26 00:27:00+00:00",
+    "fleet_assets": {
+      "WIND": 50,
+      "SOLAR": 49
+    },
+    "fleet_capability_mw": {
+      "WIND": 5684.0,
+      "SOLAR": 1892.0
+    },
+    "fleet_assets_with_data": 97,
+    "fleet_assets_without_data": [
+      "DUS1",
+      "KIL1"
+    ],
+    "metered_rows": 1630543,
+    "metered_negative": 0,
+    "peak_output_to_capability": {
+      "median": 0.9927272727272728,
+      "min": 0.6112,
+      "max": 1.1249662337662338,
+      "above_1.05": {
+        "BUL1": 1.06,
+        "CRR1": 1.12,
+        "SLR1": 1.08,
+        "WEF1": 1.05
+      }
+    },
+    "commissioned_during_period": [
+      {
+        "asset_ID": "ACD1",
+        "fuel": "SOLAR",
+        "capability_mw": 140.0,
+        "first": "2024-11-22 18:00:00+00:00"
+      },
+      {
+        "asset_ID": "BPW1",
+        "fuel": "WIND",
+        "capability_mw": 466.0,
+        "first": "2024-08-28 22:00:00+00:00"
+      },
+      {
+        "asset_ID": "CLD1",
+        "fuel": "SOLAR",
+        "capability_mw": 9.0,
+        "first": "2024-10-15 16:00:00+00:00"
+      },
+      {
+        "asset_ID": "FRM1",
+        "fuel": "WIND",
+        "capability_mw": 266.0,
+        "first": "2024-10-23 16:00:00+00:00"
+      },
+      {
+        "asset_ID": "GLE1",
+        "fuel": "SOLAR",
+        "capability_mw": 14.0,
+        "first": "2025-04-10 18:00:00+00:00"
+      },
+      {
+        "asset_ID": "HAL2",
+        "fuel": "WIND",
+        "capability_mw": 122.0,
+        "first": "2024-10-24 23:00:00+00:00"
+      },
+      {
+        "asset_ID": "KKP1",
+        "fuel": "SOLAR",
+        "capability_mw": 7.0,
+        "first": "2024-02-14 17:00:00+00:00"
+      },
+      {
+        "asset_ID": "TLE1",
+        "fuel": "SOLAR",
+        "capability_mw": 24.0,
+        "first": "2025-11-06 17:00:00+00:00"
+      },
+      {
+        "asset_ID": "WIN1",
+        "fuel": "WIND",
+        "capability_mw": 136.0,
+        "first": "2024-12-04 00:00:00+00:00"
+      },
+      {
+        "asset_ID": "WIR1",
+        "fuel": "WIND",
+        "capability_mw": 192.0,
+        "first": "2024-12-18 21:00:00+00:00"
+      }
+    ],
+    "candidates_not_in_fuel_snapshot": 21,
+    "candidates_with_output": {
+      "AWE1": 9.8,
+      "AWE2": 8.7,
+      "IRR1": 14.6,
+      "MCS1": 13.2,
+      "SEL1": 2.3
+    },
+    "candidates_energy_share_of_fleet": 0.0014468578549160852
+  },
+  "calibration": {
+    "best": {
+      "gas_mult": 0.7,
+      "cogen_must_run": 0.0,
+      "dist_fit": 20.608754736842112,
+      "dist_test": 14.71365473684211
+    },
+    "fit_period": "2024",
+    "test_period": "2025",
+    "objective": "mean |quantile difference| over P1..P95 of hourly prices",
+    "copper_lp_check_max_abs_diff": 7.105427357601002e-15
+  },
+  "timing": {
+    "base": {
+      "pearson_all": 0.3953637853499828,
+      "spearman_all": 0.6577655605420787,
+      "spearman_test_2025": 0.6996824140392643,
+      "mae_test_2025": 40.052660958904106,
+      "median_abs_err_test_2025": 25.32,
+      "quantile_distance_test_2025": 23.547170526315796
+    },
+    "calibrated": {
+      "pearson_all": 0.39411829628963824,
+      "spearman_all": 0.6574392277224609,
+      "spearman_test_2025": 0.6994140524298851,
+      "mae_test_2025": 31.98027739726027,
+      "median_abs_err_test_2025": 14.105,
+      "quantile_distance_test_2025": 14.71365473684211
+    }
+  },
+  "correlations": {
+    "wind_vs_load_real": -0.06202084753072852,
+    "wind_vs_load_synthetic": 0.10217749768231699
+  },
+  "any_binding": {
+    "real shapes \u00b7 base costs": 0.07928636570907432,
+    "real shapes \u00b7 calibrated": 0.026789785681714546,
+    "synthetic inputs (Phase 1)": 0.27037671232876714
+  },
+  "lmp_mean_real_shapes_calibrated": {
+    "NORTH": 33.506949453495274,
+    "EDM": 33.538589900371704,
+    "RD": 33.508862709401356,
+    "CAL": 33.59804428231241,
+    "SOUTH": 33.27104518163855,
+    "BC": 33.589779348431875
+  },
+  "figures": [
+    "reports/figures/p5_coverage.png",
+    "reports/figures/p5_shapes.png",
+    "reports/figures/p5_price_duration.png",
+    "reports/figures/p5_price_profiles.png",
+    "reports/figures/p5_calibration_surface.png",
+    "reports/figures/p5_congestion.png"
+  ]
+}

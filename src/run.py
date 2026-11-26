@@ -13,6 +13,9 @@ Phase 3: ML surrogates (baseline, LightGBM, MLP, congestion classifier),
 Phase 4: load network, scenarios, inputs and results into SQL (DB_URL or
          config db.url; SQLite by default) + DDL for sqlite/postgresql/mssql.
          Then: streamlit run src/dashboard.py
+Phase 5: (opt-in, needs AESO_API_KEY) pull real AESO data, check coverage,
+         replace synthetic shapes, calibrate against pool price:
+         python -m src.run --phases 5
 """
 from __future__ import annotations
 
@@ -27,7 +30,8 @@ from .config import data_dir, load_config, reports_dir
 from .simulate import DispatchResult, solve_dispatch, summarize
 from .synth import generate_inputs
 
-IMPLEMENTED_PHASES = (1, 2, 3, 4)
+IMPLEMENTED_PHASES = (1, 2, 3, 4, 5)
+DEFAULT_PHASES = (1, 2, 3, 4)  # phase 5 needs an API key and network access
 
 
 def save_result(res: DispatchResult, folder, prefix: str = "") -> None:
@@ -370,7 +374,7 @@ def phase4(cfg: dict) -> dict:
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default=None)
-    ap.add_argument("--phases", default=",".join(map(str, IMPLEMENTED_PHASES)))
+    ap.add_argument("--phases", default=",".join(map(str, DEFAULT_PHASES)))
     args = ap.parse_args(argv)
     cfg = load_config(args.config)
     phases = [int(p) for p in args.phases.split(",")]
@@ -386,6 +390,9 @@ def main(argv=None):
         phase3(cfg, phase2_runner=phase2)
     if 4 in phases:
         phase4(cfg)
+    if 5 in phases:
+        from .calibrate import phase5
+        phase5(cfg)
 
 
 if __name__ == "__main__":

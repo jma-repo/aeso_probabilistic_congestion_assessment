@@ -73,6 +73,10 @@ All numeric values arrive as **strings** (e.g. `"pool_price": "30.56"`), except 
   2025-06-02` returns the 24 hours of 2025-06-01. Omitting `endDate` returns one day.
 * Field names differ from the other endpoints (`begin_date_*` vs `begin_datetime_*`).
 * Data are available up to about 5 days before today.
+* **Record limit is ~10,000 per call, not ~100,000.** 10 assets × 1 year and even 3 assets × 1 year return HTTP 400
+  with `"With the current inputs specified the report is available for maximum end date of 2024-05-18"` (3 assets
+  × 139 days ≈ 10,000 records). One asset × one (leap) year = 8,784 records works. The client therefore batches
+  `n_assets × n_days × 24 < 9,900`.
 
 ## 5. (Not in the original list) Current Supply Demand — `GET /currentsupplydemand-api/v1/csd/generation/assets/current`
 

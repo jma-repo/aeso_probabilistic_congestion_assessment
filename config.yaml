@@ -231,3 +231,23 @@ db:
   url: sqlite:///data/aeso_poc.sqlite
   recreate: true            # drop + recreate schema on each pipeline run (data is regenerable)
   store_dispatch: true      # per-generator dispatch for every hour / scenario (largest table)
+
+# =============================================================================
+# Phase 5: calibration with real AESO data (needs AESO_API_KEY; not run by default)
+# =============================================================================
+aeso:
+  base_url: https://apimgw.aeso.ca/public
+  start: "2024-01-01"         # local calendar dates, yyyy-mm-dd, inclusive
+  end: "2025-12-31"
+  tz: America/Edmonton        # conversions use the tz database (Alberta is UTC-6 year-round from 2026-11-01)
+  polite_delay_s: 0.5         # pause between API calls
+  timeout_s: 120
+  max_retries: 5              # on 429 / 5xx, exponential backoff
+  backoff_factor: 1.0
+  ail_chunk_days: 31          # start with ~1-month chunks, halve automatically on error / truncation
+  # Documented as ~100K records per call, but the API rejects anything above ~10K (HTTP 400:
+  # "report is available for maximum end date of ..."), e.g. 3 assets x 139 days. 1 asset-year = 8,784 rows.
+  metered_max_records: 9900   # n_assets * n_days * 24 must stay below this per call
+  metered_fuels: [WIND, SOLAR]
+  cache_dir: data/raw         # raw responses cached as parquet; existing chunks are skipped
+  snapshot_date: "2026-11-26" # asset list + fuel (CSD) snapshot used for this study (cached under this date)

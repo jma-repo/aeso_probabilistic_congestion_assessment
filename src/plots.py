@@ -501,3 +501,127 @@ def p3_pred_vs_true(Y: pd.DataFrame, preds: dict, bus: str, out: Path) -> Path:
     fig.suptitle(f"Predicted vs true LMP at {bus} (test scenarios; axes clipped at $130)", x=0.01, ha="left", fontweight="bold")
     fig.tight_layout()
     return _save(fig, out, f"surrogate_pred_vs_true_{bus}")
+
+
+# ---------------------------------------------------------------------------
+# Phase 5
+# ---------------------------------------------------------------------------
+REAL, MODEL, MODEL_CAL = TEXT, "#9c9c9c", SERIES[0]
+P5_COLOR = {"real pool price": REAL, "model · base costs": MODEL, "model · calibrated": MODEL_CAL,
+            "real": REAL, "synthetic": SERIES[1]}
+
+
+def p5_coverage(monthly: pd.DataFrame, out: Path) -> Path:
+    style()
+    fig, axes = plt.subplots(1, 2, figsize=(10.5, 3.9))
+    x = pd.to_datetime(monthly.index)
+    for k, f in enumerate(("wind", "solar")):
+        axes[0].plot(x, monthly[(f, "cap_online_mw")], color=SERIES[k], label=f, lw=2)
+        axes[1].plot(x, monthly[(f, "energy_mwh")] / 1e3, color=SERIES[k], label=f, lw=2)
+    axes[0].set_title("Capacity in service (MW, monthly mean)", loc="left", fontsize=10)
+    axes[1].set_title("Metered energy (GWh per month)", loc="left", fontsize=10)
+    axes[0].legend(loc="upper left")
+    for ax in axes:
+        ax.tick_params(axis="x", rotation=30)
+    fig.suptitle("Coverage of the wind/solar fleet in metered data (assets classified by the CSD fuel snapshot)",
+                 x=0.01, ha="left", fontweight="bold")
+    fig.tight_layout()
+    return _save(fig, out, "p5_coverage")
+
+
+def p5_shapes(x: pd.DataFrame, syn: pd.DataFrame, real_load: pd.Series, syn_load: pd.Series, out: Path) -> Path:
+    style()
+    fig, axes = plt.subplots(2, 2, figsize=(10.5, 7))
+    pairs = [
+        (axes[0, 0], "Wind CF by local hour", x.cf_wind_south.groupby(x.hour).mean(), syn.cf_wind_south.groupby(syn.hour).mean(), "hour"),
+        (axes[0, 1], "Solar CF by local hour", x.cf_solar_south.groupby(x.hour).mean(), syn.cf_solar_south.groupby(syn.hour).mean(), "hour"),
+        (axes[1, 0], "Wind CF by month", x.cf_wind_south.groupby(x.month).mean(), syn.cf_wind_south.groupby(syn.month).mean(), "month"),
+        (axes[1, 1], "Load by local hour (MW)", real_load.groupby(x.hour).mean(), syn_load.groupby(syn.hour).mean(), "hour"),
+    ]
+    for ax, title, r, s_, xl in pairs:
+        ax.plot(r.index, r.values, color=REAL, lw=2.2, label="real (AESO 2024-25)")
+        ax.plot(s_.index, s_.values, color=SERIES[1], lw=1.8, ls="--", label="synthetic (Phase 1)")
+        ax.set_title(title, loc="left", fontsize=10)
+        ax.set_xlabel(xl)
+    axes[0, 0].legend(loc="upper left", fontsize=8.5)
+    fig.suptitle("Real vs synthetic input shapes", x=0.01, ha="left", fontweight="bold")
+    fig.tight_layout()
+    return _save(fig, out, "p5_shapes")
+
+
+def p5_price_duration(series: dict[str, pd.Series], out: Path) -> Path:
+    style()
+    fig, axes = plt.subplots(1, 2, figsize=(10.5, 4.2))
+    for ax, ymax in zip(axes, (1050, 160)):
+        for name, s in series.items():
+            v = np.sort(s.dropna().to_numpy())[::-1]
+            ax.plot(np.linspace(0, 100, len(v)), v, color=P5_COLOR.get(name, SERIES[2]), lw=2.2 if "real" in name else 1.7,
+                    ls="--" if "base" in name else "-", label=name)
+        ax.set_ylim(-5, ymax)
+        ax.set_xlabel("% of hours price is at or above")
+    axes[0].set_title("Full range", loc="left", fontsize=10)
+    axes[1].set_title("Zoom: $0–160/MWh", loc="left", fontsize=10)
+    axes[0].set_ylabel("$/MWh")
+    axes[1].legend(loc="upper right", fontsize=8.5)
+    fig.suptitle("Price duration curves, 2024-2025: real pool price vs copper-plate model on real shapes",
+                 x=0.01, ha="left", fontweight="bold")
+    fig.tight_layout()
+    return _save(fig, out, "p5_price_duration")
+
+
+def p5_price_profiles(hod: pd.DataFrame, monthly: pd.DataFrame, out: Path) -> Path:
+    style()
+    fig, axes = plt.subplots(1, 2, figsize=(10.5, 4.2))
+    for name in hod.columns:
+        axes[0].plot(hod.index, hod[name], color=P5_COLOR[name], lw=2.2 if "real" in name else 1.7,
+                     ls="--" if "base" in name else "-", label=name)
+        axes[1].plot(pd.to_datetime(monthly.index), monthly[name], color=P5_COLOR[name], lw=2.2 if "real" in name else 1.7,
+                     ls="--" if "base" in name else "-", label=name)
+    axes[0].set_title("Mean price by local hour", loc="left", fontsize=10)
+    axes[0].set_xlabel("hour (hour-beginning, local)")
+    axes[1].set_title("Mean price by month", loc="left", fontsize=10)
+    axes[1].tick_params(axis="x", rotation=30)
+    axes[0].set_ylabel("$/MWh")
+    axes[0].legend(loc="upper left", fontsize=8.5)
+    fig.suptitle("Timing: means are dominated by real price spikes the cost-based model cannot produce",
+                 x=0.01, ha="left", fontweight="bold")
+    fig.tight_layout()
+    return _save(fig, out, "p5_price_profiles")
+
+
+def p5_calibration_surface(grid: pd.DataFrame, best: dict, out: Path) -> Path:
+    style()
+    piv = grid.pivot(index="cogen_must_run", columns="gas_mult", values="dist_fit")
+    fig, ax = plt.subplots(figsize=(8, 4.4))
+    cmap = matplotlib.colors.LinearSegmentedColormap.from_list("seq", SEQ[::-1])
+    im = ax.imshow(piv.to_numpy(), aspect="auto", origin="lower", cmap=cmap,
+                   extent=[piv.columns.min() - 0.025, piv.columns.max() + 0.025, piv.index.min() - 0.05, piv.index.max() + 0.05])
+    ax.scatter([best["gas_mult"]], [best["cogen_must_run"]], s=90, color=SERIES[1], edgecolor="white", linewidth=2, zorder=3)
+    ax.annotate(f"best: ×{best['gas_mult']:.2f}, must-run {best['cogen_must_run']:.0%}\nfit {best['dist_fit']:.1f}, test {best['dist_test']:.1f} $/MWh",
+                (best["gas_mult"], best["cogen_must_run"]), xytext=(10, 10), textcoords="offset points", fontsize=8.5, color=TEXT,
+                bbox=dict(boxstyle="round,pad=0.25", fc="white", ec=GRID))
+    ax.grid(False)
+    ax.set_xlabel("Gas cost multiplier (cogen, CCGT, steam, peakers)")
+    ax.set_ylabel("Cogeneration must-run share")
+    cb = fig.colorbar(im, ax=ax, fraction=0.04, pad=0.02)
+    cb.set_label("quantile distance P1–P95, 2024 ($/MWh)")
+    cb.outline.set_visible(False)
+    ax.set_title("Calibration objective (darker = closer to the real 2024 price distribution)", loc="left")
+    return _save(fig, out, "p5_calibration_surface")
+
+
+def p5_congestion(cong: pd.DataFrame, out: Path) -> Path:
+    style()
+    t = cong.sort_values(cong.columns[0])
+    y = np.arange(len(t))
+    h = 0.8 / len(t.columns)
+    fig, ax = plt.subplots(figsize=(8, 4.4))
+    for k, c in enumerate(t.columns):
+        ax.barh(y + (len(t.columns) / 2 - k - 0.5) * h, t[c], height=h * 0.92, color=[SERIES[1], MODEL, MODEL_CAL][k % 3], label=c)
+    ax.set_yticks(y, t.index)
+    ax.xaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0))
+    ax.set_xlabel("Share of hours at limit")
+    ax.set_title("Congestion: synthetic inputs vs real 2024-25 shapes (same toy network)", loc="left", pad=26)
+    ax.legend(loc="lower left", bbox_to_anchor=(0, 1.0), ncol=3, fontsize=8)
+    ax.grid(axis="y", visible=False)
+    return _save(fig, out, "p5_congestion")

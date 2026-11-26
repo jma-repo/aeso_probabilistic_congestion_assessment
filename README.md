@@ -10,7 +10,7 @@ LMP data to learn from. This project therefore:
 4. stores everything in **SQL** and shows it in a **Streamlit** dashboard *(Phase 4)*,
 5. calibrates load and wind/solar shapes against **real AESO data** *(Phase 5)*.
 
-> **Status:** Phases 1–4 complete. Phase 5 (real AESO data) waits for an API key (see [Roadmap](#roadmap)).
+> **Status:** All five phases complete. Phase 5 calibrates the toy model against real AESO data for 2024–2025.
 
 > ⚠️ **This is a DC approximation.** DC-OPF assumes lossless lines, flat voltage magnitudes and small angle
 > differences, and ignores reactive power and voltage limits entirely. All capacities, costs and line ratings are
@@ -90,7 +90,17 @@ pytest -q
 
 `python -m src.run` runs every implemented phase (currently Phases 1–4, ≈11 min on 4 cores). Use
 `python -m src.run --phases 2` to run a single phase; Phase 2 reuses Phase 1 outputs, or creates them if they
-are missing. `pytest -q` runs 26 correctness tests in about 90 s.
+are missing. `pytest -q` runs 37 correctness tests in about 90 s, with no network access needed.
+
+Phase 5 is opt-in, because it needs an AESO API key and network access:
+
+```bash
+export AESO_API_KEY=...   # or put AESO_API_KEY=... in a local .env file (git-ignored)
+```
+
+```bash
+python -m src.run --phases 5
+```
 
 Then open the dashboard (it reads only from the database):
 
@@ -108,7 +118,7 @@ DB_URL="postgresql+psycopg://user:password@host:5432/aeso_poc" python -m src.run
 * The SQLite database is written to `data/aeso_poc.sqlite`.
 * Figures and summaries go to `reports/` and are committed.
 * The walkthroughs are `notebooks/01_phase1_walkthrough.ipynb`, `notebooks/02_phase2_probabilistic.ipynb`,
-  `notebooks/03_phase3_surrogates.ipynb` and `notebooks/04_phase4_sql.ipynb`.
+  `notebooks/03_phase3_surrogates.ipynb`, `notebooks/04_phase4_sql.ipynb` and `notebooks/05_phase5_aeso.ipynb`.
 * Phase 2 and Phase 3 tables are also written as CSV files to `reports/tables/`.
 
 ### Repository layout
@@ -127,6 +137,8 @@ src/evaluate.py      metrics by bus/regime, MC comparison, worst cases, 1-D step
 src/surrogate_study.py  Phase 3 pipeline
 src/db.py            SQLAlchemy schema, writers/readers, DDL export (python -m src.db --ddl)
 src/dashboard.py     Streamlit dashboard (reads only from the database)
+src/aeso_api.py      AESO API client: retries, polite delay, parquet cache, typed parsers
+src/calibrate.py     Phase 5: coverage checks, real shapes, price calibration, real-shape OPF
 src/checks.py        sanity checks incl. an independent angle-based DC-OPF
 src/plots.py         figures
 src/run.py           one-command pipeline
@@ -135,6 +147,7 @@ notebooks/           walkthrough
 reports/             generated summaries and figures (committed)
 sql/                 generated DDL (SQLite / PostgreSQL / SQL Server) + portable example queries
 docs/schema.md       ER diagram of the database
+docs/aeso_api_probe.md  response shapes and quirks of the AESO endpoints (Phase 5 probe)
 ```
 
 ---
@@ -649,6 +662,166 @@ and by a Streamlit `AppTest` smoke test in `tests/test_phase4.py`.
 
 ---
 
+## Phase 5 — calibration with real AESO data (2024–2025)
+
+Full auto-generated output: [`reports/phase5_summary.md`](reports/phase5_summary.md). The probe of the endpoints'
+response shapes and quirks is documented in [`docs/aeso_api_probe.md`](docs/aeso_api_probe.md).
+
+### Data pipeline
+
+* **Key handling.**
+  * The key is read from `AESO_API_KEY`, or from a git-ignored `.env` file, and sent only as the `API-KEY`
+    header.
+  * It is never logged, printed, cached or committed; a test checks that it appears neither in logs nor in
+    error messages.
+  * In the cloud environment used here, the key was injected by the network proxy, so the code only ever saw a
+    placeholder.
+* **Client.** One shared `requests` session, with exponential backoff on 429/5xx (respecting `Retry-After`) and a
+  0.5 s pause between calls. Each request's endpoint, date range and number of assets is logged.
+* **Caching.** Raw responses are cached as parquet in `data/raw/`, and chunks already cached are skipped.
+  The first pull took 266 calls (about 8 minutes); reruns take 0 calls.
+* **Endpoint quirks found and handled.** Each one has a unit test.
+
+  | Endpoint | Quirk | Handling |
+  |---|---|---|
+  | Pool price | `endDate` is inclusive; at most 1 year per request | yearly chunks |
+  | AIL | Drops the last hour when a request *ends* on a 25-hour fall-back day | each chunk requests one extra day, trims and de-duplicates on UTC, checks completeness, and splits into halves on error or truncation |
+  | Metered volume | `endDate` is **exclusive** | request the day after the last wanted day |
+  | Metered volume | The real limit is **about 10,000 records per call**, not the documented 100,000. The API returns HTTP 400 *"report is available for maximum end date of …"* | one asset-year per call |
+  | Asset list | **No fuel type** (only SOURCE/SINK), so name matching would miss 34 of 50 wind and 30 of 49 solar assets | fuel type taken from the Current Supply Demand asset snapshot (`fuel_type`, `maximum_capability`) |
+
+* **Time.**
+  * Every series is keyed on the **UTC** field. On the 2025-11-02 fall-back day the local (MPT) hour 01:00 appears
+    twice.
+  * The tz database (2026e) and AESO's data agree that **Alberta has used UTC−6 year-round since 2026-11-01**:
+    2026-03-08 has 23 hours, 2026-11-01 has 24.
+  * Calendar features use `zoneinfo`; no time offset is hard-coded.
+
+### Data quality and coverage
+
+* **Pool price and AIL** are complete: 17,544 of 17,544 hours (2024 is a leap year), with no duplicates and no
+  empty values.
+* **Wind and solar fleet.** The fuel snapshot lists 50 wind assets (5,684 MW) and 49 solar assets (1,892 MW).
+  97 of them have metered data in 2024–25; the other 2 were commissioned later. That is 1.63 million metered rows,
+  none negative.
+* **Assets commissioned mid-period.** 10 assets started during the period, including about 1.2 GW of wind in
+  Aug–Dec 2024. The fleet capacity factor therefore counts an asset's capacity only from its first metered hour
+  (figure below).
+* **Capacity check.** The snapshot's capability is a current value. Checked against history, each asset's peak
+  metered output divided by its capability has a median of 0.99 (range 0.61–1.12), so the snapshot is a reasonable
+  denominator for 2024–25.
+* **Assets missing from the snapshot.** The snapshot only covers assets reporting today. 21 wind/solar-like
+  assets in the asset list are missing from it (retired, small or renamed); 5 of them produced energy in 2024–25.
+  That is only **0.14% of fleet energy**, a negligible gap.
+  * Caveat: assets with uninformative names and no fuel type are invisible to this check, so 0.14% is a lower
+    bound.
+
+![coverage](reports/figures/p5_coverage.png)
+
+### Real vs synthetic shapes: what the synthetic data got wrong
+
+![shapes](reports/figures/p5_shapes.png)
+
+| | Real 2024–25 | Synthetic (Phase 1) |
+|---|---:|---:|
+| Wind CF: mean / std / P95 | 0.30 / 0.19 / 0.63 | 0.39 / **0.33** / **0.96** |
+| Wind CF: hours below 5% of max | 8.8% | 16.8% |
+| Wind diurnal shape | night peak, minimum around 10:00 | almost flat |
+| Solar CF: mean / P95 | 0.21 / 0.81 | 0.12 / 0.59 |
+| Load: mean / std (MW) | 10,214 / 818 | 9,799 / 908 |
+| Load diurnal shape | flat-topped, peak at 17:00 | morning and evening double peak |
+| Correlation of wind with load | −0.06 | +0.10 |
+
+* **Synthetic wind was far too "peaky".**
+  * A single AR(1) site swings from 0 to 100%, whereas the real *fleet* is spread over many sites and rarely
+    exceeds 63%.
+  * This is the most consequential assumption in the whole POC (see congestion below).
+* Synthetic solar was too low.
+* The synthetic load had a residential double-peak shape. Real AIL is dominated by flat industrial demand.
+
+### Calibration: does the copper-plate price resemble the real pool price?
+
+With line limits removed, the model's price is the merit-order price, computed exactly; a check against the
+copper-plate LP with must-run agrees to 7e-15. It is compared with the real pool price hour by hour.
+
+Two transparent parameters were **fitted on 2024 and tested on 2025**. The objective is the mean absolute
+difference between the quantile functions over P1–P95, which deliberately excludes the spike tail.
+
+1. **Gas cost multiplier**, applied to cogen, CCGT, steam and peakers. Fitted value: **0.70**, consistent with low
+   2024–25 gas prices.
+2. **Cogeneration must-run share.** The objective is **flat** in this direction, so the parameter is **not
+   identifiable** from prices. With about 5 GW of wind and 1.5 GW of solar against roughly 10 GW of load, must-run
+   cogen almost never pushes the flexible residual below the gas units. The fit returns 0%.
+
+| 2025 test year | Real pool price | Model, base costs | Model, calibrated |
+|---|---:|---:|---:|
+| P10 / P50 / P90 (\$/MWh) | 1.7 / 22.9 / 64.0 | 42.0 / 45.0 / 55.0 | 29.4 / 31.5 / 45.5 |
+| Mean / std | 43.7 / 104.1 | 47.1 / 5.3 | 33.8 / 5.6 |
+| Hours ≤ \$1 / ≥ \$100 / ≥ \$500 | 9.3% / 5.2% / 1.6% | 0 / 0 / 0 | 0 / 0 / 0 |
+| Quantile distance P1–P95 | — | 23.5 | **14.7** |
+| Hourly MAE / median absolute error | — | 40.1 / 25.3 | **32.0 / 14.1** |
+| Spearman rank correlation with real | — | 0.70 | 0.70 |
+
+![price duration](reports/figures/p5_price_duration.png)
+![price profiles](reports/figures/p5_price_profiles.png)
+
+* **What is close.**
+  * The calibrated model matches the 2024 median (\$31.5 vs \$30.6). It halves the test-year quantile distance and
+    the median absolute error.
+  * The *ordering* of hours is partly right (Spearman 0.70): windy hours are cheap in both.
+* **What only partly transfers.**
+  * Within one year, the model's price sits on a single plateau (\$31.5) for about half of all hours. The real price
+    spreads continuously from \$16 to \$42 over P20–P70 in 2024.
+  * In 2025, real prices were lower (median \$22.9), so the 2024-fitted multiplier overshoots the 2025 median by
+    \$8.6. The gas price *level* changes from year to year, and one static parameter cannot carry it across years.
+* **What differs, and why. This is a structural gap, not a tuning problem.**
+  1. **No price spikes.** In reality 8% of hours are ≥ \$100 and 1.9% are ≥ \$500. They are concentrated in the
+     evening: the mean real price is \$95–110 for each hour from 17:00 to 20:00. They come from offer behaviour, scarcity, and ramping and commitment
+     limits. A cost-based merit order with one step per unit cannot produce them: the modelled maximum is the
+     \$120 peaker.
+  2. **No zero prices.** In reality 7% of hours are ≤ \$1. These come from self-scheduled imports and must-run
+     units offered at \$0 and from minimum stable generation; the toy stack has none of these.
+  3. **A flat, stepped body.** Thirteen units give about 10 price levels; the real stack has hundreds of offer
+     blocks.
+* **Implication.** Use this model for *congestion patterns and relative LMP differences*. Do not use it for price
+  levels or price risk. Price spikes need an offer-based supply curve (AESO merit-order data) or a scarcity
+  adder; see next steps.
+
+![calibration surface](reports/figures/p5_calibration_surface.png)
+
+### Congestion with real shapes: the headline result changes
+
+The network DC-OPF (same toy network and ratings) was re-run on the real 2024–25 shapes.
+
+| Share of hours at limit | Synthetic inputs | Real shapes, base costs | Real shapes, calibrated costs |
+|---|---:|---:|---:|
+| SOUTH–CAL | 22.1% | **1.2%** | 1.2% |
+| EDM–NORTH (each circuit) | 1.5% | 1.5% | 1.5% |
+| BC–CAL (intertie) | 3.4% | 5.3% | 0.0% |
+| ≥1 line at limit | 27.0% | **7.9%** | 2.7% |
+
+![congestion real vs synthetic](reports/figures/p5_congestion.png)
+
+* **The 22% SOUTH–CAL congestion in Phases 1–3 was mostly an artefact of the peaky synthetic wind.** With the real
+  fleet's diversified output, the southern export limit binds in about 1% of hours.
+  * The truth is probably in between. Applying one *province-wide* fleet capacity factor to a single southern bus
+    understates the variability of a regional sub-fleet, because southern wind farms are closer together and more
+    correlated.
+  * The public endpoints give no asset locations. Mapping assets to AESO planning regions is the next step.
+* **Intertie congestion depends on the gas price.** With calibrated (cheaper) gas, the \$55 BC import is never
+  economic, so the intertie stops binding.
+* **The North corridor is unchanged**, because its use is driven by the flat industrial load and cogen, not by
+  weather.
+* **Lesson for a real nodal study.** The *methods* in Phases 2–4 carry over unchanged: Monte Carlo, N-1, surrogates
+  and storage. The *numbers* are only as good as the input shapes and ratings. The calibration step exposed the
+  most important wrong assumption, the wind process, before any conclusion was drawn from it.
+
+The real-shape study is stored in the database as study `real_2024_2025`, and the observed hourly series (pool
+price, AIL, wind and solar CF) as table `aeso_hourly`. The dashboard's *LMP distributions* tab can overlay the
+actual pool price. Note that rerunning Phase 4 recreates the schema, so run Phase 5 after Phase 4.
+
+---
+
 ## Roadmap
 
 | Phase | Content | Status |
@@ -657,7 +830,7 @@ and by a Streamlit `AppTest` smoke test in `tests/test_phase4.py`.
 | 2 | Monte Carlo (load, wind, line and generator outages); N-1 ranking; solve-time budget | ✅ done |
 | 3 | Surrogates: copper-plate baseline, per-bus LightGBM + SHAP, multi-output MLP, line-congestion classifier; surrogate MC versus full OPF | ✅ done |
 | 4 | SQLAlchemy store (SQLite by default; Postgres/SQL Server through the connection string); Streamlit dashboard | ✅ done |
-| 5 | AESO API: real AIL load shape, wind/solar shapes, calibration against pool price (needs `AESO_API_KEY`) | after key is confirmed |
+| 5 | AESO API: real AIL load shape, wind/solar shapes, calibration against pool price (needs `AESO_API_KEY`) | ✅ done |
 
 ### Next steps beyond this POC
 
@@ -665,7 +838,10 @@ and by a Streamlit `AppTest` smoke test in `tests/test_phase4.py`.
 * Graph neural networks that use the network topology (or ratings and topology as features), so surrogates can
   generalise across outages and network what-ifs.
 * Surrogates with an OPF fallback: call the OPF when the classifier or the reserve margin flags a stressed system.
-* Calibrating costs from AESO merit-order data.
+* Calibrating costs from AESO merit-order data: an offer-based supply curve, needed for price spikes and $0
+  hours (Phase 5 shows that a cost-based stack cannot produce them).
+* Regional wind and solar shapes: map metered assets to AESO planning regions, and re-derive line ratings,
+  because Phase 5 shows congestion results hinge on regional wind variability.
 * Forced outage rates from AIES generation capacity data.
 * Intertie limits taken from AESO intertie reports.
 * Security-constrained OPF: add N-1 constraints to the market dispatch, and use probabilistic or seasonal line

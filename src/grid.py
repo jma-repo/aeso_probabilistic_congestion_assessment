@@ -84,6 +84,9 @@ def build_network(
             p_nom=g["p_nom"],
             marginal_cost=g["marginal_cost"],
             p_max_pu=pmax,
+            # optional must-run share (e.g. cogeneration tied to industrial steam); default 0.
+            # Never above what is available in the hour (outages / profiles).
+            p_min_pu=np.minimum(g.get("p_min_pu", 0.0), pmax),
         )
 
     for bus in load_buses(cfg):

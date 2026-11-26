@@ -138,6 +138,10 @@ surrogate_metric = Table("surrogate_metric", metadata,
                          Column("model", S, primary_key=True),
                          Column("bus_id", S, ForeignKey("bus.bus_id"), primary_key=True),
                          Column("metric", S, primary_key=True), Column("value", Float))
+aeso_hourly = Table("aeso_hourly", metadata,  # observed AESO data (Phase 5), keyed on UTC
+                    Column("hour_start_utc", DateTime, primary_key=True),
+                    Column("pool_price", Float), Column("forecast_pool_price", Float), Column("ail_mw", Float),
+                    Column("wind_cf", Float), Column("solar_cf", Float))
 runtime = Table("runtime", metadata,
                 Column("run_id", Integer, ForeignKey("run.run_id"), primary_key=True),
                 Column("method", String(128), primary_key=True), Column("seconds", Float))

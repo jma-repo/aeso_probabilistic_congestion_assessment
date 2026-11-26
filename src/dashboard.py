@@ -26,11 +26,12 @@ from src.config import load_config  # noqa: E402
 SERIES = ["#257de0", "#f47230", "#00b894", "#f2a600", "#ee7fac", "#008a17"]
 BUS_ORDER = ["NORTH", "EDM", "RD", "CAL", "SOUTH", "BC"]
 BUS_COLOR = dict(zip(BUS_ORDER, SERIES))
-MODEL_COLOR = {"OPF": "#191919", "LightGBM": SERIES[0], "MLP": SERIES[1], "baseline": "#9c9c9c"}
+MODEL_COLOR = {"OPF": "#191919", "LightGBM": SERIES[0], "MLP": SERIES[1], "baseline": "#9c9c9c", "(actual)": "#191919"}
 SEQ = [[0, "#cce3fd"], [0.25, "#84b9f3"], [0.5, "#338ced"], [0.75, "#1b64be"], [1, "#0e3d7e"]]
 SOURCES = {"mc_opf": "Monte Carlo · full DC-OPF", "mc_surrogate": "Monte Carlo · ML surrogate",
            "hourly_opf": "Deterministic 2-year hourly · DC-OPF"}
-STUDIES = {"mc_test": "Monte Carlo (20,000 scenarios, outages + uncertainty)", "hourly": "Deterministic hourly (2 years)"}
+STUDIES = {"mc_test": "Monte Carlo (20,000 scenarios, outages + uncertainty)", "hourly": "Deterministic hourly (2 years)",
+           "real_2024_2025": "Real AESO 2024-25 shapes (calibrated costs)"}
 
 st.set_page_config(page_title="Nodal congestion POC", layout="wide")
 
@@ -62,6 +63,20 @@ def network():
 def congestion_stats(run_id: int) -> pd.DataFrame:
     t = db.line_congestion_stat
     return q(select(t).where(t.c.run_id == run_id), f"lcs{run_id}")
+
+
+def available_studies(run_id: int) -> list[str]:
+    t = db.scenario
+    have = set(q(select(t.c.study).where(t.c.run_id == run_id).distinct(), f"studies{run_id}")["study"])
+    return [s for s in STUDIES if s in have]
+
+
+def observed_pool_price() -> pd.Series:
+    t = db.aeso_hourly
+    try:
+        return q(select(t.c.pool_price), "aeso_pool")["pool_price"]
+    except Exception:  # noqa: BLE001 - table absent before Phase 5
+        return pd.Series(dtype=float)
 
 
 def lmp_values(run_id: int, study: str, buses: tuple[str, ...]) -> pd.DataFrame:
@@ -203,17 +218,17 @@ with tab_map:
         st.metric("Lines with P(at limit) > 5%", int((sub["p_binding"] > 0.05).sum()), help="of 8 circuits")
         show = sub[["p_binding", "ci95_low", "ci95_high", "expected_hours_per_year"]].sort_values("p_binding", ascending=False)
         st.dataframe(show.style.format({"p_binding": "{:.2%}", "ci95_low": "{:.2%}", "ci95_high": "{:.2%}",
-                                        "expected_hours_per_year": "{:,.0f}"}, na_rep="—"), use_container_width=True)
+                                        "expected_hours_per_year": "{:,.0f}"}, na_rep="—"), width="stretch")
         st.caption("95% Wilson intervals (OPF sources). Surrogate = mean predicted probability of the line classifier.")
     with c1:
         st.markdown(f"**P(line at its limit) — {SOURCES[src]}**  ·  hover a line or bus for details")
         st.plotly_chart(network_figure(buses, lines, gens, sub["p_binding"], "P(at limit)",
-                                       mean_lmp_by_bus(run_id, study)), use_container_width=True)
+                                       mean_lmp_by_bus(run_id, study)), width="stretch")
 
 with tab_lmp:
     c1, c2 = st.columns([1, 3])
     with c1:
-        study = st.radio("Study", list(STUDIES), format_func=STUDIES.get, key="lmp_study")
+        study = st.radio("Study", available_studies(run_id), format_func=STUDIES.get, key="lmp_study")
         sel = st.multiselect("Buses", BUS_ORDER, default=["SOUTH", "CAL", "NORTH"])
         add_sur = study == "mc_test" and st.checkbox("Overlay surrogate predictions (one bus)", value=False)
         xmax = st.slider("x-axis max ($/MWh)", 60, 1000, 130, step=10)
@@ -222,6 +237,10 @@ with tab_lmp:
     else:
         v = lmp_values(run_id, study, tuple(sel))
         series = {b: v.loc[v.bus_id == b, "lmp"] for b in sel}
+        if study == "real_2024_2025":
+            obs = observed_pool_price()
+            if not obs.empty:
+                series["AESO pool price (actual)"] = obs
         if add_sur:
             b0 = sel[0]
             sv = surrogate_values(run_id, (b0,))
@@ -229,10 +248,10 @@ with tab_lmp:
             for m in ("LightGBM", "MLP", "baseline"):
                 series[f"{b0} {m}"] = sv.loc[sv.model == m, "lmp_pred"]
         with c2:
-            st.plotly_chart(ecdf_figure(series, xmax), use_container_width=True)
+            st.plotly_chart(ecdf_figure(series, xmax), width="stretch")
             qt = pd.DataFrame({k: quantiles(s) for k, s in series.items()}).T
             st.dataframe(qt.style.format({"P(LMP ≥ $100)": "{:.2%}"} | {c: "${:.2f}" for c in ("P10", "P50", "P90", "P99", "mean")}),
-                         use_container_width=True)
+                         width="stretch")
             st.caption("LMP is step-shaped: most hours sit on a few price plateaus (the marginal unit's offer, or a "
                        "loop-flow mixture of two offers when a line binds). Quantiles can jump between plateaus.")
 
@@ -255,7 +274,7 @@ with tab_n1:
     show = n1[list(cols)].copy()
     for c, f in fmts.items():  # format explicitly: NULL (islanding rows) -> "—"
         show[c] = show[c].map(lambda v, f=f: "—" if pd.isna(v) else f.format(v))
-    st.dataframe(show.rename(columns=cols), use_container_width=True)
+    st.dataframe(show.rename(columns=cols), width="stretch")
     t = db.n1_delta_lmp
     dl = q(select(t).where(t.c.run_id == run_id), f"dl{run_id}").pivot(index="outaged_line", columns="bus_id",
                                                                         values="mean_delta_lmp")
@@ -266,7 +285,7 @@ with tab_n1:
                                colorbar=dict(title="$/MWh"), hovertemplate="%{y} out → %{x}: %{z:+.2f} $/MWh<extra></extra>"))
     fig.update_layout(height=420, margin=dict(t=30, l=10, r=10, b=10), yaxis=dict(autorange="reversed"),
                       title="Mean LMP change after re-dispatch")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
     st.caption("The base dispatch is not security-constrained, so N-1 overloads are expected (most of all on the "
                "North double circuit). Negative Δ cost = removing the line relieves a loop-flow constraint.")
 
@@ -295,7 +314,7 @@ with tab_sur:
         fig.update_layout(barmode="group", height=440, xaxis=dict(tickformat=".0%", title="P(line at limit)"),
                           legend=dict(orientation="h", y=1.02, yanchor="bottom", x=0), margin=dict(t=80, l=10, r=10, b=10),
                           plot_bgcolor="white", title=dict(text="Monte Carlo congestion probability", y=0.97))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
         c1, c2 = st.columns([1, 2])
         with c1:
@@ -304,8 +323,8 @@ with tab_sur:
             piv = m[m.metric.isin(["MAE", "RMSE", "MAE_congested", "MAE_uncongested"])].pivot_table(
                 index="model", columns="metric", values="value", aggfunc="mean")
             st.markdown("**Accuracy on the 20,000 held-out scenarios** (mean over buses, $/MWh)")
-            st.dataframe(piv.style.format("{:.2f}"), use_container_width=True)
-            st.dataframe(rt[["seconds"]].style.format("{:.3g}"), use_container_width=True)
+            st.dataframe(piv.style.format("{:.2f}"), width="stretch")
+            st.dataframe(rt[["seconds"]].style.format("{:.3g}"), width="stretch")
             bus_sel = st.selectbox("Scatter: bus", BUS_ORDER, index=4)
             model_sel = st.selectbox("Scatter: model", ["LightGBM", "MLP", "baseline"])
         with c2:
@@ -322,4 +341,4 @@ with tab_sur:
                               yaxis=dict(title="predicted ($/MWh)", range=[-5, 140]), plot_bgcolor="white",
                               margin=dict(t=30, l=10, r=10, b=10), showlegend=False,
                               title=f"{model_sel} vs OPF at {bus_sel} (6,000 random test scenarios; axes clipped at $140)")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
