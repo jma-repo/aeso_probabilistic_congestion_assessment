@@ -11,6 +11,7 @@ LMP data to learn from. This project therefore:
 5. calibrates load and wind/solar shapes against **real AESO data** *(Phase 5)*.
 
 > **Status:** All five phases complete. Phase 5 calibrates the toy model against real AESO data for 2024–2025.
+> An optional Phase 6 benchmarks Microsoft's pretrained GridSFM AC-OPF graph model against a full AC-OPF solver.
 
 > ⚠️ **This is a DC approximation.** DC-OPF assumes lossless lines, flat voltage magnitudes and small angle
 > differences, and ignores reactive power and voltage limits entirely. All capacities, costs and line ratings are
@@ -148,6 +149,7 @@ reports/             generated summaries and figures (committed)
 sql/                 generated DDL (SQLite / PostgreSQL / SQL Server) + portable example queries
 docs/schema.md       ER diagram of the database
 docs/aeso_api_probe.md  response shapes and quirks of the AESO endpoints (Phase 5 probe)
+experiments/gridsfm/ Phase 6: GridSFM vs PowerModels/Ipopt benchmark (separate environment, see its README)
 ```
 
 ---
@@ -822,6 +824,138 @@ actual pool price. Note that rerunning Phase 4 recreates the schema, so run Phas
 
 ---
 
+## Phase 6 (stretch) — GridSFM: a pretrained AC-OPF graph model vs a full solver
+
+[GridSFM](https://github.com/microsoft/GridSFM) (Microsoft Research, 2026) is a pretrained graph neural network for
+**AC** optimal power flow on grids with at least 500 buses. Given a grid and a scenario it predicts voltages, angles,
+generator P/Q, branch flows and a **feasibility probability**. Its sample scenarios and released datasets come from
+PGLib cases and from open US state grids built from OpenStreetMap.
+
+The released checkpoint (`gridsfm_open_v1.1.pt`) was run **without retraining** and compared with the full
+AC-OPF solver on the same scenarios. Code and setup are in [`experiments/gridsfm/`](experiments/gridsfm/); raw
+results are in `reports/phase6_gridsfm_*.json`.
+
+### Set-up
+
+* **Grids.**
+  * `msr_mississippi`: the smallest released open (OpenStreetMap-based) grid, with 528 buses, 39 generators and
+    902 branches.
+  * `case500_goc`: a PGLib case with 500 buses and 171 generators, used as a second check.
+* **Scenarios.**
+  * The unperturbed base case.
+  * "Normal" scenarios: system load × 0.85–1.15, and in about three quarters of them 1–2 of the largest units
+    forced out.
+  * "Stress" scenarios: load × 1.25–1.70.
+  * Both ranges are inside GridSFM's own training perturbations (load × 0.8–1.5, unit outages).
+* **Reference solver.** Julia 1.11.5 with PowerModels (AC polar formulation, `ACPPowerModel`) and Ipopt, with
+  exactly the package versions and Ipopt settings of GridSFM's data pipeline.
+  * Each `.pyg.json` scenario is converted to MATPOWER. On both base cases the conversion reproduces the shipped
+    solution's objective to 3e-9 (relative) and voltages to 3e-5 pu.
+  * Julia's one-off 10 s compile ("JIT warm-up") is excluded from the timings.
+* **GridSFM.** CPU only, 4 threads, single-graph `predict()` and batched calls, in a separate Python virtual
+  environment, because GridSFM requires torch < 2.9.
+
+### Inference time vs the full solver
+
+| | msr_mississippi (61 scenarios) | case500_goc (31 scenarios) |
+|---|---:|---:|
+| Ipopt, scenarios with a solution: median per scenario | 1.58 s (n = 25) | 1.50 s (n = 21) |
+| Ipopt, scenarios with no feasible point: median / max | 11.2 s / 532 s (n = 36) | 8.6 s / 28.5 s (n = 10) |
+| **GridSFM per scenario** (single-graph / batched) | **0.33 s / 0.31 s** | **0.24 s / 0.20 s** |
+| Speed-up on solvable scenarios | ≈ 5× | ≈ 6× |
+| Speed-up over the whole study | 112× (2,215 s vs 20 s) | 18× (134 s vs 7 s) |
+
+At 500 buses on a CPU, GridSFM is only about **5× faster than Ipopt on solvable scenarios**. Most of the headline
+speed-up comes from **infeasible scenarios**, where Ipopt can take minutes to give up and GridSFM still answers in
+0.3 s. The gap should grow with grid size and with GPU batching; neither was tested here.
+
+### Accuracy (zero-shot; compared with the full solver)
+
+| | msr_mississippi | case500_goc |
+|---|---:|---:|
+| Base case: cost error / V MAE / Pg MAE | −0.30% / 0.0014 pu / 3.3 MW | −0.54% / 0.0011 pu / 0.6 MW |
+| Load-scaling-only scenarios: mean \|cost error\| (p95) | 7.0% (13.3%) | 7.1% (12.0%) |
+| Scenarios with load scaling and unit outages: mean \|cost error\| (p95) | 9.1% (15.7%) | 6.8% (12.8%) |
+| Perturbed scenarios: V MAE / Pg MAE per unit | 0.006–0.007 pu / 10–15 MW | 0.005–0.006 pu / 5 MW |
+| **Perturbed scenarios: mean \|total generation − Ipopt\|** | **320–390 MW (≈5% of load)** | **680–770 MW (≈4%)** |
+
+![GridSFM balance](reports/figures/p6_gridsfm_balance.png)
+
+* **The base snapshots are near-perfect, but they are probably part of the training data.** They therefore show
+  how well GridSFM fits known snapshots, not how well it generalises.
+* **On perturbed scenarios, the predicted total generation barely follows system load.**
+  * Across the case500 scenarios, the generation error is strongly anti-correlated with the load factor
+    (r = −0.93): too much generation at low load, too little at high load.
+  * The prediction therefore violates the power balance by hundreds of MW. Hence cost errors of about 7%, against
+    0.3–0.5% on the base cases.
+* **The model does not copy the generator set-point input.** Each generator's input features include a Pg column,
+  which in the open MSR grids almost equals the solved dispatch (correlation 1.000). Setting it to zero, to
+  (Pmin + Pmax)/2, or scaling it with load changed the cost error by less than 0.2 percentage points and the
+  balance error by a few MW, so there is no leakage.
+
+### Feasibility predictions (GridSFM probability ≥ 0.5 counted as "feasible")
+
+| | Ipopt found a solution | Ipopt found none |
+|---|---:|---:|
+| msr_mississippi: predicted feasible / infeasible | 25 / 0 | **14** / 22 |
+| case500_goc: predicted feasible / infeasible | 13 / **8** | 0 / 10 |
+
+* Clear cases are classified correctly: every stress scenario (load ≥ 1.25×) is flagged infeasible.
+* **Near the feasibility boundary, the classifier fails in both directions.**
+  * On Mississippi, 14 scenarios with unit outages at normal load are called feasible although Ipopt found no
+    solution.
+  * On case500, 8 solvable scenarios at load × 1.04–1.14 are flagged infeasible.
+* Caveat: Ipopt's `LOCALLY_INFEASIBLE` is a *local* certificate, not a proof of infeasibility.
+
+### How GridSFM compares with this POC
+
+| | This POC (Phases 1–3) | GridSFM-Open |
+|---|---|---|
+| Physics | **DC** OPF: linear, lossless, no voltage or reactive power. Exact and fast to solve (about 4 ms per scenario on one core here). | **AC** OPF: non-convex, with losses, voltages, reactive power and transformer taps. Seconds per solve, sometimes minutes, and solves can fail. |
+| Grid | Toy 6-bus, 8-circuit Alberta-like system with made-up parameters | Real-size PGLib and OpenStreetMap-derived US grids (from 500 to several thousand buses) |
+| Learning set-up | **One small model per grid and per output** (LightGBM per bus, an MLP, a classifier per line), trained in seconds on thousands of OPF solves of *that* grid. Grid-specific, and must be retrained when ratings or topology change (Phase 3). | **One pretrained, topology-agnostic graph model.** Its graph representation of buses, branches and network cycles lets it run zero-shot on other grids and on N-1 topologies, and it can be fine-tuned. |
+| Outputs | **LMPs per bus** and binding lines, i.e. the market quantities | Primal AC state (V, θ, Pg, Qg, flows) and a feasibility probability. **No prices.** |
+| Accuracy on the target task | MAE \$0.84/MWh; congestion probabilities within 0.08 percentage points of the OPF Monte Carlo | Cost within 0.5% on the base snapshots, but about 7% (p95 12–16%) under load and outage perturbations |
+| What it is good for | Fast probabilistic congestion and price studies on a fixed network model | Fast screening of AC feasibility and an approximate AC operating point on real-size grids, or a warm start for the solver |
+
+### Why GridSFM does not output LMPs
+
+* **An LMP is not part of the dispatch.** It is the **dual variable** (Lagrange multiplier) of each bus's
+  power-balance constraint: the change in total cost if one more MW were consumed at that bus. GridSFM is trained
+  to predict primal quantities (voltages, dispatch, flows) plus feasibility, so its outputs contain no
+  multipliers.
+* **Recovering prices from a predicted dispatch is not reliable.** It requires knowing which constraints bind and
+  their sensitivities. On top of that, the predicted dispatch is not exactly optimal or balanced (see the 300–770 MW
+  balance errors above), and small primal errors near a binding limit produce large price errors. This is the same
+  step-function issue seen in Phase 3.
+* **Practical options.**
+  1. Use GridSFM's prediction as a warm start and run the OPF once, to obtain exact duals.
+  2. Add a dual (price) output to the model, trained on the multipliers the solver already exports. This was out
+     of scope here: no retraining.
+  3. For market prices, follow this POC and learn LMPs directly from a market-style OPF, here DC.
+* **A note on the shipped duals.** The per-bus dual values (`solution.duals.bus`) shipped with the GridSFM samples
+  could not be matched bus by bus to a clean PowerModels re-solve: the means agree, the per-bus values do not. All
+  LMPs quoted here come from this project's own solves.
+
+### Could this POC build a 500+-bus Alberta grid from open data and solve it with GridSFM?
+
+In principle, yes: GridSFM's `power_grid/` pipeline does exactly this for US states. For Alberta it would need:
+
+1. **Topology.** OpenStreetMap transmission lines and substations (138/144, 240 and 500 kV). The 240/500 kV
+   backbone alone is probably under 500 buses, the model's minimum supported size, so the 138/144 kV network would
+   be needed too.
+2. **Generators.** Plant locations from OSM `power=plant` or NRCan data, joined to the AESO asset list and the CSD
+   fuel and capability data from Phase 5.
+3. **Load.** AIL allocated to substations by AESO planning area.
+4. **Electrical parameters and solvability.** Line impedances and ratings estimated from voltage class and
+   length, then GridSFM's Julia relaxation step to make the AC-OPF solvable.
+
+The result would be a *plausible*, open-data approximation, not AESO's confidential planning model. GridSFM would
+give fast AC screening on it, but per Phase 6 its zero-shot accuracy under load changes must be checked against a
+solver, and it would still give **no LMPs**. This is listed as a next step rather than done.
+
+---
+
 ## Roadmap
 
 | Phase | Content | Status |
@@ -831,6 +965,7 @@ actual pool price. Note that rerunning Phase 4 recreates the schema, so run Phas
 | 3 | Surrogates: copper-plate baseline, per-bus LightGBM + SHAP, multi-output MLP, line-congestion classifier; surrogate MC versus full OPF | ✅ done |
 | 4 | SQLAlchemy store (SQLite by default; Postgres/SQL Server through the connection string); Streamlit dashboard | ✅ done |
 | 5 | AESO API: real AIL load shape, wind/solar shapes, calibration against pool price (needs `AESO_API_KEY`) | ✅ done |
+| 6 | (stretch) GridSFM pretrained AC-OPF graph model vs a full AC-OPF solver (Julia PowerModels + Ipopt) | ✅ done |
 
 ### Next steps beyond this POC
 
@@ -838,6 +973,8 @@ actual pool price. Note that rerunning Phase 4 recreates the schema, so run Phas
 * Graph neural networks that use the network topology (or ratings and topology as features), so surrogates can
   generalise across outages and network what-ifs.
 * Surrogates with an OPF fallback: call the OPF when the classifier or the reserve margin flags a stressed system.
+* Open-data Alberta grid with at least 500 buses (OSM topology, AESO assets, AIL by planning area), solved with
+  AC-OPF. Use GridSFM for fast screening and warm starts, and a solver for duals and LMPs (see Phase 6).
 * Calibrating costs from AESO merit-order data: an offer-based supply curve, needed for price spikes and $0
   hours (Phase 5 shows that a cost-based stack cannot produce them).
 * Regional wind and solar shapes: map metered assets to AESO planning regions, and re-derive line ratings,

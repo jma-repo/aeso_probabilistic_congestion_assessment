@@ -1,62 +1,85 @@
-# Phase 6 (stretch): GridSFM-Open vs a full AC-OPF solver — work in progress
+# Phase 6 (stretch): GridSFM-Open vs a full AC-OPF solver
 
-**Status: blocked on the reference solver; waiting for a decision. See "Blocker" below.**
+Results and discussion are in the main [README](../../README.md#phase-6-stretch--gridsfm-a-pretrained-ac-opf-graph-model-vs-a-full-solver).
+Raw results are in `reports/phase6_gridsfm_<case>.json`, and the figure is `reports/figures/p6_gridsfm_balance.png`.
 
-## Setup used (separate virtual environment, nothing added to the main requirements)
+Nothing here is installed into the main environment. GridSFM pins `torch>=2.6,<2.9` and needs `torch_geometric`;
+the reference solver needs Julia.
 
-GridSFM pins `torch>=2.6,<2.9` and needs `torch_geometric`, while this repo uses a newer torch. So a separate venv is
-used:
+## Files
+
+| File | Purpose |
+|---|---|
+| `benchmark.py` | Builds the scenarios, converts `.pyg.json` to MATPOWER, calls the Julia solver, runs GridSFM, and writes the JSON results |
+| `solve_acopf.jl` | Reference AC-OPF: PowerModels `ACPPowerModel` + `build_opf` + Ipopt (tol 1e-6, acceptable_tol 1e-4, max_iter 3000), the same as GridSFM's data pipeline. It solves every case in one process, after a JIT warm-up, and returns status, objective, timings, voltages, dispatch and LMPs. |
+| `plot_results.py` | Draws the figure. Runs in the main environment. |
+
+## Setup (the steps actually used)
 
 ```bash
 git clone --depth 1 https://github.com/microsoft/GridSFM.git
 ```
+
+Python environment for GridSFM (torch 2.8.0, torch_geometric 2.8.1, gridsfm 1.1.0):
 
 ```bash
 python -m venv gridsfm-venv
 ```
 
 ```bash
-gridsfm-venv/bin/pip install "torch>=2.6,<2.9" "torch_geometric>=2.5,<3" "numpy<3" "scipy<2" "huggingface_hub>=0.34,<1" pandapower numba
+gridsfm-venv/bin/pip install "torch>=2.6,<2.9" "torch_geometric>=2.5,<3" "numpy<3" "scipy<2" "huggingface_hub>=0.34,<1"
 ```
 
 ```bash
 gridsfm-venv/bin/pip install -e GridSFM/model
 ```
 
+Checkpoint (61 MB; `load_model` verifies its SHA-256). `HF_HUB_DISABLE_XET=1` avoids the Xet transfer hosts:
+
 ```bash
 cd GridSFM/model && HF_HUB_DISABLE_XET=1 ../../gridsfm-venv/bin/python -c "from huggingface_hub import hf_hub_download; hf_hub_download('microsoft/GridSFM_Open', 'gridsfm_open_v1.1.pt', local_dir='checkpoints')"
 ```
 
-This installs torch 2.8.0, torch_geometric 2.8.1 and gridsfm 1.1.0. The checkpoint is 61 MB, and `load_model`
-verifies its SHA-256. No Julia was needed for inference.
+Julia 1.11.5 with GridSFM's own `Project.toml` and `Manifest.toml`, which gives PowerModels 0.21.5, Ipopt 1.14.0 and
+JuMP 1.29.4:
 
-## Results so far
+```bash
+curl -fLO https://julialang-s3.julialang.org/bin/linux/x64/1.11/julia-1.11.5-linux-x86_64.tar.gz && mkdir julia && tar -xzf julia-1.11.5-linux-x86_64.tar.gz -C julia --strip-components=1
+```
 
-GridSFM was run on three of the ≥500-bus base cases shipped with GridSFM, including the smallest open "MSR" grid
-(`msr_mississippi`, 528 buses). It ran on CPU with 4 threads, after one warm-up call, and was compared with the
-Julia/Ipopt AC-OPF solution stored in each sample.
+```bash
+mkdir jlproj && cp GridSFM/power_grid/US/topology_solver_pipeline/{Project,Manifest}.toml jlproj/
+```
 
-| case | buses | inference | cost error | V MAE | Pg MAE | feasibility prob. |
-|---|---:|---:|---:|---:|---:|---:|
-| msr_mississippi | 528 | 258 ms | −0.30% | 0.0014 pu | 3.3 MW | 1.000 |
-| case500_goc | 500 | 212 ms | −0.54% | 0.0011 pu | 0.6 MW | 0.997 |
-| msr_louisiana | 571 | 267 ms | −0.09% | 0.0016 pu | 1.0 MW | 1.000 |
+```bash
+julia/bin/julia --project=jlproj -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+```
 
-Caveat: these base grids are very likely part of GridSFM's training distribution, so this is **not** an
-out-of-sample test.
+Network hosts needed (cloud environment allow-list):
 
-## Blocker: the reference solver
+* `huggingface.co` and `us.aws.cdn.hf.co`;
+* `julialang-s3.julialang.org`, `pkg.julialang.org`, `us-west.pkg.julialang.org` / `us-east.pkg.julialang.org`,
+  and `storage.julialang.net`.
 
-The task needs the *same* perturbed scenarios solved by a full AC-OPF solver, for timing, and to check the
-feasibility predictions. Three routes were tried:
+## Run
 
-* GridSFM's own data pipeline uses **Julia** (PowerModels + Ipopt). It is not installed.
-* `cyipopt` (Python bindings to Ipopt) **fails to build**, because there is no system Ipopt library.
-* pandapower's pure-Python **PIPS** interior-point AC-OPF **does not converge** on these cases (528 / 500 buses).
-  It fails even with all branch, angle and voltage limits relaxed, and from a power-flow start. It works on
-  pandapower's own case30 and case118.
-  * This is not a data-conversion problem. `benchmark.py`'s `.pyg.json` → MATPOWER conversion reproduces the
-    Julia/Ipopt voltages exactly when an AC power flow is run at the reference dispatch.
+```bash
+gridsfm-venv/bin/python experiments/gridsfm/benchmark.py --gridsfm-root GridSFM/model --julia julia/bin/julia --julia-project jlproj --case msr_mississippi --n-normal 40 --n-stress 20
+```
 
-`benchmark.py` already contains the full scenario study: conversion, perturbed scenarios, timing, and the
-feasibility confusion matrix. It only needs a working AC-OPF solver behind `solve_acopf()`.
+```bash
+gridsfm-venv/bin/python experiments/gridsfm/benchmark.py --gridsfm-root GridSFM/model --julia julia/bin/julia --julia-project jlproj --case case500_goc --n-normal 20 --n-stress 10
+```
+
+```bash
+python experiments/gridsfm/plot_results.py
+```
+
+The Mississippi run takes about 40 minutes, mostly Ipopt proving infeasibility; one scenario alone took 9 minutes.
+
+## Things that did not work (kept for the record)
+
+* **pandapower's pure-Python PIPS AC-OPF** does not converge on these 500-bus cases, even with all limits relaxed,
+  although the converted network reproduces the reference voltages exactly in an AC power flow.
+* **`cyipopt`** fails to build without a system Ipopt library. Julia's `Ipopt_jll` ships its own binaries, which
+  is why the Julia route was used.
